@@ -1,4 +1,5 @@
-(random-seed (time-nanosecond (current-time)))
+;;(random-seed (time-nanosecond (current-time)))
+(random-seed 107)
 
 (define-record-type position
   (fields x y))
@@ -31,12 +32,12 @@
 
 (define (get-testing-board)
   (vector (make-vector 8 #f)
-          (make-vector 8 white-pawn)
           (make-vector 8 #f)
           (make-vector 8 #f)
           (make-vector 8 #f)
           (make-vector 8 #f)
-          (make-vector 8 black-pawn)
+          (make-vector 8 #f)
+          (make-vector 8 #f)
           (make-vector 8 #f)))
 
 (define matrix-ref
@@ -338,23 +339,148 @@
                    #f)
       (apply-moves (cdr moves) board))))
 
+(define (copy-board board)
+  (let ([new-board (make-vector 8 #f)])
+    (do ((x 0 (1+ x))) ((= x 8))
+      (vector-set! new-board x (make-vector 8 #f))
+      (do ((y 0 (1+ y))) ((= y 8))
+        (matrix-set! new-board y x (matrix-ref board y x))))
+    new-board))
+
+(define (apply-moves-on-new-copy moves board)
+  (let ([new-board (copy-board board)])
+    (apply-moves moves new-board)
+    new-board))
+
 (define (do-one-move color last-move-x last-move-y board)
-  (let ([moves (get-possible-moves color last-move-x last-move-y board)])
+  (let ([moves (filter
+                (lambda (move)
+                  (not (in-check? color (apply-moves-on-new-copy move board))))
+                (get-possible-moves color last-move-x last-move-y board))])
     (if (null? moves)
         (printf "no more moves\n")
         (let ([random-move (list-ref moves (random (length moves)))])
           (apply-moves random-move board)
+          ;;          (display "\033c")
           (draw-board board)
-          (sleep (make-time 'time-duration 10000000 0))
+          (sleep (make-time 'time-duration 500000000 0))
           (do-one-move (if (eq? color 'w) 'b 'w) 0 0 board)))))
+
+(define (get-king-position color board)
+  (let ([king (if (eq? color 'w) 0 8)])
+    (call/cc
+     (lambda (k)
+       (do ((x 0 (1+ x))) ((= x 8))
+         (do ((y 0 (1+ y))) ((= y 8))
+           (let ([p (matrix-ref board x y)])
+             (if (and p (= p king))
+                 (k (make-position x y))))))
+       #f))))
+
+(define (in-check? color board)
+  (let* ([offset (if (eq? color 'w) 8 0)]
+         [king (+ offset white-king)]
+         [queen (+ offset white-queen)]
+         [rook (+ offset white-rook)]
+         [bishop (+ offset white-bishop)]
+         [knight (+ offset white-knight)]
+         [pawn (+ offset white-pawn)]
+         [op-color (if (eq? color 'w) 'b 'w)]
+         [pawn-direction (if (eq? color 'w) -1 1)])
+    ;; find king position
+    (let ([king-position (get-king-position color board)])
+      (if (not king-position)
+          (printf "there is no king\n")
+          (let ([king-x (position-x king-position)]
+                [king-y (position-y king-position)])
+            (or
+             (and (square-on-board? (1+ king-x) (+ pawn-direction king-y))
+                  (let ([p (matrix-ref board (1+ king-x) (+ pawn-direction king-y))])
+                    (and p
+                         (= pawn p))))
+             (and (square-on-board? (1- king-x) (+ pawn-direction king-y))
+                  (let ([p (matrix-ref board (1- king-x) (+ pawn-direction king-y))])
+                    (and p
+                         (= pawn p))))
+             (let check-knights
+                 ([spots '((1 2) (2 1) (1 -2) (2 -1) (-1 2) (-2 1) (-1 -2) (-2 -1))])
+               (if (null? spots)
+                   #f
+                   (let ([spot (car spots)])
+                     (or (check-knights (cdr spots))
+                         (and (square-on-board? (+ king-x (car spot)) (+ king-y (cadr spot)))
+                              (let ([p (matrix-ref board (+ king-x (car spot))
+                                                   (+ king-y (cadr spot)))])
+                                (and (is-color? p op-color)
+                                     (knight? p))))))))
+             (let check-lines ([moving-x king-x]
+                               [moving-y king-y]
+                               [directions '((1 0) (0 1) (-1 0) (0 -1))])
+               (if (null? directions)
+                   #f
+                   (let* ([d (car directions)]
+                          [new-x (+ (car d) moving-x)]
+                          [new-y (+ (cadr d) moving-y)])
+                     (cond
+                      [(not (square-on-board? new-x new-y))
+                       (check-lines king-x king-y (cdr directions))]
+                      [(square-empty-and-on-board? new-x new-y board)
+                       (check-lines new-x new-y directions)]
+                      [(is-color? (matrix-ref board new-x new-y) color)
+                       (check-lines king-x king-y (cdr directions))]
+                      [else
+                       (let ([p (matrix-ref board new-x new-y)])
+                         (or (= p queen)
+                             (= p rook)
+                             (check-lines king-x king-y (cdr directions))))]))))
+             (let check-diagonals ([moving-x king-x]
+                                   [moving-y king-y]
+                                   [directions '((1 1) (-1 1) (-1 -1) (1 -1))])
+               (if (null? directions)
+                   #f
+                   (let* ([d (car directions)]
+                          [new-x (+ (car d) moving-x)]
+                          [new-y (+ (cadr d) moving-y)])
+                     (cond
+                      [(not (square-on-board? new-x new-y))
+                       (check-diagonals king-x king-y (cdr directions))]
+                      [(square-empty-and-on-board? new-x new-y board)
+                       (check-diagonals new-x new-y directions)]
+                      [(is-color? (matrix-ref board new-x new-y) color)
+                       (check-diagonals king-x king-y (cdr directions))]
+                      [else
+                       (let ([p (matrix-ref board new-x new-y)])
+                         (or (= p queen)
+                             (= p bishop)
+                             (check-diagonals king-x king-y (cdr directions))))]))))
+             (let check-king ([spots '((-1 -1) (-1 0) (-1 1) (0 -1) (0 1) (1 -1) (1 0) (1 1))])
+               (if (null? spots)
+                   #f
+                   (let ([spot (car spots)])
+                     (or
+                      (check-king (cdr spots))
+                      (let ([new-x (+ king-x (car spot))]
+                            [new-y (+ king-y (cadr spot))])
+                        (and (square-on-board? new-x new-y)
+                             (let ([p (matrix-ref board new-x new-y)])
+                               (and p
+                                    (= king p)))))))))))))))
 
 #;(get-pawn-moves 5 1 'b (get-starting-board))
 
 (define b (get-testing-board))
-(matrix-set! b 5 0 black-bishop)
-(matrix-set! b 5 1 white-bishop)
+(matrix-set! b 2 7 black-rook)
+(matrix-set! b 5 1 white-king)
 ;;(matrix-set! b 2 3 black-pawn)
-;;(draw-board b)
+(draw-board b)
+(in-check? 'w b)
+
+(define b2 '#(#(#f #f #f #f #f #f #f #f) #(#f #f 4 #f #f #f #f #f)
+              #(#f #f #f #f 3 #f #f #f) #(#f #f #f #f #f 8 #f #f)
+              #(#f 0 #f #f #f #f #f #f) #(#f #f #f #f #f #f #f #f)
+              #(#f #f #f #f #f #f #f 4) #(#f 11 #f #f #f #f #f #f)))
+(draw-board b2)
+(in-check? 'b b2)
 ;;(do-one-move 'b 0 3 b)
 
 ;;(length (get-possible-moves 'b 0 0 (get-starting-board)))
