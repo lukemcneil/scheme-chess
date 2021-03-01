@@ -1,0 +1,18 @@
+uci
+setoption name Move Overhead value 100
+setoption name Ponder value true
+setoption name Threads value 2
+setoption name Hash value 256
+isready
+setoption name UCI_Variant value chess
+setoption name UCI_Chess960 value false
+isready
+position startpos
+setoption name UCI_Opponent value none 1500 human jgrizbt
+isready
+position startpos moves e2e4
+go movetime 10000
+position startpos moves e2e4 c7c5 d1e2
+go wtime 49430 btime 43000 winc 8000 binc 8000
+position startpos moves e2e4 c7c5 d1e2 b8c6 g1f3
+go ponder wtime 49430 btime 38970 winc 8000 binc 8000

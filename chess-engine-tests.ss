@@ -16,6 +16,13 @@
 (define (get-position-6-state)
   (fen->state "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10"))
 
+(define (algebraic->indices str)
+  (let ([first (string-ref str 0)]
+        [second (string-ref str 1)])
+    (values
+     (char- first #\a)
+     (- 8 (- (char->integer second) 48)))))
+
 (define (fen->state fen)
   (let* ([parts
           (let split-at-spaces ([ls (string->list fen)] [acc '()])
@@ -50,7 +57,14 @@
              [#\/ (set! x 0) (set! y (1+ y))])))
      fen-board)
     (make-state (if (char=? (car fen-color) #\w) 'w 'b)
-                (if (char=? #\- (car fen-en-passant)) empty-move (en-passant-square))
+                (if (char=? #\- (car fen-en-passant))
+                    empty-move
+                    (call-with-values (lambda () (algebraic->indices (list->string fen-en-passant)))
+                      (lambda (x y)
+                        (make-move (make-position x (if (= y 2) (1- y) (1+ y)))
+                                   (make-position x (if (= y 2) (1+ y) (1- y)))
+                                   #f
+                                   #f))))
                 (member #\K fen-castle-states)
                 (member #\Q fen-castle-states)
                 (member #\k fen-castle-states)
@@ -99,4 +113,4 @@
     (list 'position-6 (get-position-6-state) 3 89890)
     (list 'position-6 (get-position-6-state) 4 3894594))))
 
-(run-tests)
+;;(run-tests)

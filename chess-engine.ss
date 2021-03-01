@@ -1,7 +1,7 @@
 (begin
   (define seed (time-nanosecond (current-time)))
+  #;(random-seed 189936001)
   (random-seed seed))
-;;(random-seed 107)
 
 (define-record-type position
   (fields x y))
@@ -27,8 +27,6 @@
 (define black-knight #b1100)
 (define black-pawn #b1101)
 
-(load "chess-engine-tests.ss")
-
 (define (get-empty-board)
   (vector (make-vector 8 #f)
           (make-vector 8 #f)
@@ -46,6 +44,8 @@
 (define matrix-set!
   (lambda (m i j x)
     (vector-set! (vector-ref m j) i x)))
+
+(load "/home/luke/chess/chess-engine-tests.ss")
 
 (define (draw-board board)
   (newline)
@@ -90,6 +90,8 @@
        (not (black? p))))
 (define (is-color? p color)
   ((if (eq? color 'w) white? black?) p))
+(define (other-color color)
+  (if (eq? color 'w) 'b 'w))
 
 (define (king? p)
   (or (= p 0) (= p 8)))
@@ -112,33 +114,36 @@
         [castle-k-b (state-castle-k-b state)]
         [castle-q-b (state-castle-q-b state)]
         [last-move (state-last-move state)])
-    (apply append
-           (apply append
-                  (map
-                   (lambda (row y)
-                     (map
-                      (lambda (p x)
-                        (let ([check? (if (eq? color 'w) white? black?)])
-                          (if (and p (check? p))
-                              (cond
-                               [(king? p)
-                                (let ([castle-k (if (eq? color 'w) castle-k-w castle-k-b)]
-                                      [castle-q (if (eq? color 'w) castle-q-w castle-q-b)])
-                                  (get-king-moves x y castle-k castle-q color board))]
-                               [(queen? p) (get-sliding-piece-moves x y color board
-                                                                    '((1 0) (0 1) (-1 0) (0 -1)
-                                                                      (1 1) (1 -1) (-1 1) (-1 -1)))]
-                               [(rook? p) (get-sliding-piece-moves x y color board
-                                                                   '((1 0) (0 1) (-1 0) (0 -1)))]
-                               [(bishop? p) (get-sliding-piece-moves x y color board
-                                                                     '((1 1) (1 -1) (-1 1) (-1 -1)))]
-                               [(knight? p) (get-knight-moves x y color board)]
-                               [(pawn? p) (get-pawn-moves x y last-move color board)])
-                              '())))
-                      (vector->list row)
-                      (iota (vector-length row))))
-                   (vector->list board)
-                   (iota (vector-length board)))))))
+    (filter
+     (lambda (move)
+       (not (in-check? color (state-board (apply-moves-on-new-copy move state)))))
+     (apply append
+            (apply append
+                   (map
+                    (lambda (row y)
+                      (map
+                       (lambda (p x)
+                         (let ([check? (if (eq? color 'w) white? black?)])
+                           (if (and p (check? p))
+                               (cond
+                                [(king? p)
+                                 (let ([castle-k (if (eq? color 'w) castle-k-w castle-k-b)]
+                                       [castle-q (if (eq? color 'w) castle-q-w castle-q-b)])
+                                   (get-king-moves x y castle-k castle-q color board))]
+                                [(queen? p) (get-sliding-piece-moves x y color board
+                                                                     '((1 0) (0 1) (-1 0) (0 -1)
+                                                                       (1 1) (1 -1) (-1 1) (-1 -1)))]
+                                [(rook? p) (get-sliding-piece-moves x y color board
+                                                                    '((1 0) (0 1) (-1 0) (0 -1)))]
+                                [(bishop? p) (get-sliding-piece-moves x y color board
+                                                                      '((1 1) (1 -1) (-1 1) (-1 -1)))]
+                                [(knight? p) (get-knight-moves x y color board)]
+                                [(pawn? p) (get-pawn-moves x y last-move color board)])
+                               '())))
+                       (vector->list row)
+                       (iota (vector-length row))))
+                    (vector->list board)
+                    (iota (vector-length board))))))))
 
 (define (square-on-board? x y)
   (and (<= x 7)
@@ -368,27 +373,6 @@
                              'en-passant))))
          '()))))
 
-(define (play-game board)
-  (draw-board board)
-  (display "from:")
-  (let ([from (symbol->string (read))])
-    (display "to:")
-    (let ([to (symbol->string (read))])
-      (call-with-values (lambda () (algebraic-to-indices from))
-        (lambda (x y)
-          (call-with-values (lambda () (algebraic-to-indices to))
-            (lambda (new-x new-y)
-              (matrix-set! board new-x new-y (matrix-ref board x y))
-              (matrix-set! board x y #f)
-              (play-game board))))))))
-
-(define (algebraic-to-indices str)
-  (let ([first (string-ref str 0)]
-        [second (string-ref str 1)])
-    (values
-     (char- first #\a)
-     (- 8 (- (char->integer second) 48)))))
-
 (define (get-changed-castle-info move)
   (let* ([from (move-from move)]
          [to (move-to move)]
@@ -426,7 +410,7 @@
               [castle-k-b (state-castle-k-b state)]
               [castle-q-b (state-castle-q-b state)])
           (if (null? moves)
-              (make-state (if (eq? color 'w) 'b 'w)
+              (make-state (other-color color)
                           last-move
                           (if castle-k-w k-w #f)
                           (if castle-q-w q-w #f)
@@ -479,29 +463,39 @@
                  (vector->list board))))
        2)))
 
-(define (do-one-move state)
+(define (play-one-game state)
   (let helper ([state state] [move-count 0])
     (if (insufficient-material? state)
-        (printf "Stalemate because of insufficient material!!!\n")
+        (begin
+          ;;(printf "stalemate because of insufficient material\n")
+          0)
         (let* ([board (state-board state)]
                [color (state-color state)]
-               [moves (filter
-                       (lambda (move)
-                         (not (in-check? color (state-board (apply-moves-on-new-copy move state)))))
-                       (get-possible-moves state))])
+               [moves (get-possible-moves state)])
           (if (null? moves)
               (if (in-check? color board)
-                  (printf "Checkmate on ~d!!!\n" (if (equal? color 'w) "white" "black"))
-                  (printf "Stalemate because ~d has no moves!!!\n"
-                          (if (equal? color 'w) "white" "black")))
-              (let ([random-move (list-ref moves (random (length moves)))])
-                (let ([new-state (apply-moves random-move state)])
-                  (display "\033c")
-                  ;;(pretty-print random-move)
+                  (begin
+                    ;;(printf "checkmate on ~d\n" (if (equal? color 'w) "white" "black"))
+                    (if (equal? color 'w) -1 1))
+                  (begin
+                    ;;(printf "stalemate because ~d has no moves\n"
+                    ;;        (if (equal? color 'w) "white" "black"))
+                    0))
+              (let ([selected-move
+                     ((if (eq? color 'w)
+                          choose-human-move
+                          (make-minimax-chooser-with-depth 3))
+;;                          choose-best-material-move)
+                      moves state)])
+                (let ([new-state (apply-moves selected-move state)])
+                  ;;;;;;;;;;;;;;;;;;;;
+                  ;;(display "\033c")
                   (draw-board board)
-                  ;;(printf "possible moves: ~d\n" (length moves))
-                  ;;(printf "move number: ~d\n" move-count)
-                  ;;(sleep (make-time 'time-duration 1000000 0))
+                  (printf "possible moves: ~d\n" (length moves))
+                  (printf "move number: ~d\n" move-count)
+                  (printf "seed: ~d\n" seed)
+                  (sleep (make-time 'time-duration 100000000 0))
+                  ;;;;;;;;;;;;;;;;;;;;
                   (helper new-state (1+ move-count)))))))))
 
 (define (get-king-position color board)
@@ -523,7 +517,7 @@
          [bishop (+ offset white-bishop)]
          [knight (+ offset white-knight)]
          [pawn (+ offset white-pawn)]
-         [op-color (if (eq? color 'w) 'b 'w)]
+         [op-color (other-color color)]
          [pawn-direction (if (eq? color 'w) -1 1)])
     (or
      (and (square-on-board? (1+ x) (+ pawn-direction y))
@@ -607,6 +601,14 @@
               [king-y (position-y king-position)])
           (square-under-attack? king-x king-y color board)))))
 
+(define (in-checkmate? color state)
+  (and (in-check? color (state-board state))
+       (null? (get-possible-moves state))))
+
+(define (in-stalemate? color state) ;;TODO make more efficient along with calling in-checkmate?
+  (and (not (in-check? color (state-board state)))
+       (null? (get-possible-moves state))))
+
 (define (get-possibilities starting-state starting-depth)
   (let helper ([to-search (list (cons starting-state starting-depth))] [total 0])
     (if (null? to-search)
@@ -616,17 +618,14 @@
           (if (= 0 depth)
               0
               (let ([color (state-color state)])
-                (let ([moves (filter
-                              (lambda (move)
-                                (not (in-check? color (state-board (apply-moves-on-new-copy move state)))))
-                              (get-possible-moves state))])
+                (let ([moves (get-possible-moves state)])
                   (if (= 1 depth)
                       (begin
                         (for-each
                          (lambda (move)
-                           ;;                           (display "\033c")
-                           ;;                           (draw-board (state-board (apply-moves-on-new-copy move state)))
-                           ;;                           (sleep (make-time 'time-duration 10000000 0))
+                           ;;(display "\033c")
+                           ;;(draw-board (state-board (apply-moves-on-new-copy move state)))
+                           ;;(sleep (make-time 'time-duration 1000000 0))
                            (cond
                             [(eq? (move-name (car move)) 'en-passant)
                              (set! en-passant-count (1+ en-passant-count))]
@@ -646,4 +645,122 @@
                         (helper (append new-to-search (cdr to-search))
                                 total))))))))))
 
-(do-one-move (get-starting-board-state))
+(define (choose-random-move moves current-state)
+  (list-ref moves (random (length moves))))
+
+(define (choose-best-material-move moves state)
+  (let ([color (state-color state)])
+    (let helper ([moves (cdr moves)]
+                 [m (evaluate-material (apply-moves-on-new-copy (car moves) state))]
+                 [best-move (car moves)]
+                 [best-moves (list (car moves))])
+      (if (null? moves)
+          (choose-random-move best-moves state)
+          (let* ([new-state (apply-moves-on-new-copy (car moves) state)]
+                 [eval (evaluate-material new-state)])
+            (cond
+             [((if (eq? color 'w) > <) eval m)
+              (helper (cdr moves) eval (car moves) (list (car moves)))]
+             [(= eval m) (helper (cdr moves) m best-move (cons (car moves) best-moves))]
+             [else (helper (cdr moves) m best-move best-moves)]))))))
+
+(define (choose-human-move moves current-state)
+  (display "from: ")
+  (call-with-values (lambda () (algebraic->indices (symbol->string (read))))
+    (lambda (from-x from-y)
+      (display "to: ")
+      (call-with-values (lambda () (algebraic->indices (symbol->string (read))))
+        (lambda (to-x to-y)
+          (list (make-move (make-position from-x from-y)
+                           (make-position to-x to-y)
+                           #f
+                           #f)))))))
+          
+(define (evaluate-material state)
+  (let ([board (state-board state)]
+        [color (state-color state)]
+        [score 0])
+    (cond
+     [(in-checkmate? color state) (if (eq? color 'b) +inf.0 -inf.0)]
+     [(in-stalemate? color state) (if (eq? color 'b) -inf.0 +inf.0)]
+     [else
+      (begin
+        (do ((x 0 (1+ x))) ((= x 8))
+          (do ((y 0 (1+ y))) ((= y 8))
+            (let ([p (matrix-ref board x y)])
+              (when p
+                (set! score (+ score
+                               ((if (white? p) + -)
+                                (cond
+                                 [(king? p) 100]
+                                 [(queen? p) 9]
+                                 [(rook? p) 5]
+                                 [(bishop? p) 3]
+                                 [(knight? p) 3]
+                                 [(pawn? p) 1]))))))))
+        score)])))
+
+(define (make-minimax-chooser-with-depth depth)
+  (lambda (moves state)
+    (choose-move-minimax-with-depth depth moves state)))
+
+(define (choose-move-minimax-with-depth depth moves state)
+  (define (get-best color ls)
+    (let ([compare (if (eq? color 'w) > <)])
+      (let helper ([ls (cdr ls)]
+                   [m (caar ls)]
+                   [best-moves (list (cdar ls))])
+        (cond
+         [(null? ls) #;(printf "evaluation from ~d: ~d\n" (state-color state) m)
+          (choose-random-move best-moves state)]
+         [(compare (caar ls) m) (helper (cdr ls) (caar ls) (list (cdar ls)))]
+         [(= (caar ls) m) (helper (cdr ls) m (cons (cdar ls) best-moves))]
+         [else (helper (cdr ls) m best-moves)]))))
+  (get-best (state-color state)
+            (map
+             (lambda (move)
+               (cons (evaluate-material-recursively
+                      (apply-moves-on-new-copy move state)
+                      (if (eq? (state-color state) 'w) 'min 'max)
+                      (1- depth))
+                     move))
+             moves)))
+
+(define (evaluate-material-recursively state max-or-min depth)
+  (if (= depth 0)
+      (evaluate-material state)
+      (let ([moves (get-possible-moves state)])
+        (if (null? moves)
+            (evaluate-material state)
+            (apply (if (eq? max-or-min 'max) max min)
+                   (map
+                    (lambda (move) (evaluate-material-recursively
+                                    (apply-moves-on-new-copy move state)
+                                    (if (eq? max-or-min 'max) 'min 'max)
+                                    (1- depth)))
+                    moves))))))
+
+(define (play-games n)
+  (let helper ([n n] [white-wins 0] [black-wins 0] [stalemates 0])
+    (begin
+      (set! seed (time-nanosecond (current-time)))
+      (random-seed seed))
+    (if (= 0 n)
+        (printf "white wins: ~d, black wins: ~d, stalemates: ~d\n" white-wins black-wins stalemates)
+        (case (play-one-game (get-starting-board-state))
+          [(1) (helper (1- n) (1+ white-wins) black-wins stalemates)]
+          [(-1) (helper (1- n) white-wins (1+ black-wins) stalemates)]
+          [(0) (helper (1- n) white-wins black-wins (1+ stalemates))]))))
+
+;; (define b (get-empty-board))
+;; (matrix-set! b 4 0 black-king)
+;; (matrix-set! b 0 0 white-rook)
+;; (matrix-set! b 0 1 white-rook)
+;; (matrix-set! b 4 4 white-king)
+;; (draw-board b)
+
+;;(pretty-print (play-one-game (get-starting-board-state)))
+
+;;(play-one-game (fen->state "r1bq2r1/b4pk1/p1pp1p2/1p2pP2/1P2P1PB/3P4/1PPQ2P1/R3K2R w - -"))
+
+;;(play-games 1)
