@@ -463,7 +463,7 @@
                  (vector->list board))))
        2)))
 
-(define (play-one-game state)
+(define (play-one-game state p1 p2)
   (let helper ([state state] [move-count 0])
     (if (insufficient-material? state)
         (begin
@@ -483,8 +483,8 @@
                     0))
               (let ([selected-move
                      ((if (eq? color 'w)
-                          choose-human-move
-                          (make-minimax-chooser-with-depth 3))
+                          p1
+                          p2)
 ;;                          choose-best-material-move)
                       moves state)])
                 (let ([new-state (apply-moves selected-move state)])
@@ -657,7 +657,7 @@
       (if (null? moves)
           (choose-random-move best-moves state)
           (let* ([new-state (apply-moves-on-new-copy (car moves) state)]
-                 [eval (evaluate-material new-state)])
+                 [eval (evaluate-material new-state 0)])
             (cond
              [((if (eq? color 'w) > <) eval m)
               (helper (cdr moves) eval (car moves) (list (car moves)))]
@@ -676,12 +676,12 @@
                            #f
                            #f)))))))
           
-(define (evaluate-material state)
+(define (evaluate-material state depth)
   (let ([board (state-board state)]
         [color (state-color state)]
         [score 0])
     (cond
-     [(in-checkmate? color state) (if (eq? color 'b) +inf.0 -inf.0)]
+     [(in-checkmate? color state) (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))]
      [(in-stalemate? color state) (if (eq? color 'b) -inf.0 +inf.0)]
      [else
       (begin
@@ -711,11 +711,14 @@
                    [m (caar ls)]
                    [best-moves (list (cdar ls))])
         (cond
-         [(null? ls) #;(printf "evaluation from ~d: ~d\n" (state-color state) m)
-          (choose-random-move best-moves state)]
+         [(null? ls) (printf "evaluation from ~d: ~d\n" (state-color state) m)
+          (choose-random-move best-moves state)
+          ;;best-moves
+          ]
          [(compare (caar ls) m) (helper (cdr ls) (caar ls) (list (cdar ls)))]
          [(= (caar ls) m) (helper (cdr ls) m (cons (cdar ls) best-moves))]
          [else (helper (cdr ls) m best-moves)]))))
+  moves
   (get-best (state-color state)
             (map
              (lambda (move)
@@ -728,10 +731,14 @@
 
 (define (evaluate-material-recursively state max-or-min depth)
   (if (= depth 0)
-      (evaluate-material state)
+      (begin
+        ;;(set! counter (1+ counter))
+        (evaluate-material state depth))
       (let ([moves (get-possible-moves state)])
         (if (null? moves)
-            (evaluate-material state)
+            (begin
+              ;;(set! counter (1+ counter))
+              (evaluate-material state depth))
             (apply (if (eq? max-or-min 'max) max min)
                    (map
                     (lambda (move) (evaluate-material-recursively
@@ -739,6 +746,72 @@
                                     (if (eq? max-or-min 'max) 'min 'max)
                                     (1- depth)))
                     moves))))))
+
+(define (make-minimax-alpha-beta-chooser-with-depth depth)
+  (lambda (moves state)
+    (choose-move-minimax-alpha-beta-with-depth depth moves state)))
+
+(define (choose-move-minimax-alpha-beta-with-depth depth moves state)
+  (define (get-best color ls)
+    (let ([compare (if (eq? color 'w) > <)])
+      (let helper ([ls (cdr ls)]
+                   [m (caar ls)]
+                   [best-moves (list (cdar ls))])
+        (cond
+         [(null? ls) (printf "info evaluation from alpha beta ~d: ~d\n" (state-color state) m)
+          (choose-random-move best-moves state)
+          ;;best-moves
+          ]
+         [(compare (caar ls) m) (helper (cdr ls) (caar ls) (list (cdar ls)))]
+         [(= (caar ls) m) (helper (cdr ls) m (cons (cdar ls) best-moves))]
+         [else (helper (cdr ls) m best-moves)]))))
+  (get-best (state-color state)
+            (map
+             (lambda (move)
+               (cons (alpha-beta
+                      (apply-moves-on-new-copy move state)
+                      (if (eq? (state-color state) 'w) #f #t)
+                      (1- depth)
+                      -inf.0
+                      +inf.0)
+                     move))
+             moves)))
+
+(define dummy-evaluate
+  (let ([i 0])
+    (lambda (state)
+      (set! i (1+ i))
+      i)))
+
+(define (alpha-beta state max? depth alpha beta)
+  (if (= depth 0)
+      (begin
+        ;;(set! counter (1+ counter))
+        (evaluate-material state depth))
+      (let ([moves (get-possible-moves state)])
+        (if (null? moves)
+            (begin
+              ;;(set! counter (1+ counter))
+              (evaluate-material state depth))
+            (let ([value (if max? -inf.0 +inf.0)])
+              (call/cc
+               (lambda (k)
+                 (for-each
+                  (lambda (move)
+                    (set! value ((if max? max min) value
+                                 (alpha-beta
+                                  (apply-moves-on-new-copy move state)
+                                  (not max?)
+                                  (1- depth)
+                                  alpha
+                                  beta)))
+                    (if max?
+                        (set! alpha (max alpha value))
+                        (set! beta (min beta value)))
+                    (when (>= alpha beta)
+                          (k #f)))
+                  moves)))
+              value)))))
 
 (define (play-games n)
   (let helper ([n n] [white-wins 0] [black-wins 0] [stalemates 0])
@@ -764,3 +837,17 @@
 ;;(play-one-game (fen->state "r1bq2r1/b4pk1/p1pp1p2/1p2pP2/1P2P1PB/3P4/1PPQ2P1/R3K2R w - -"))
 
 ;;(play-games 1)
+
+(play-one-game (get-starting-board-state)
+              (make-minimax-alpha-beta-chooser-with-depth 3)
+              ;;(make-minimax-chooser-with-depth 2)
+              (make-minimax-alpha-beta-chooser-with-depth 4))
+
+#;(begin
+  (define s (get-position-5-state))
+  (define counter 0)
+  (choose-move-minimax-alpha-beta-with-depth 3 (get-possible-moves s) s)
+  (pretty-print counter)
+  (define counter 0)
+  (choose-move-minimax-with-depth 3 (get-possible-moves s) s)
+  (pretty-print counter))
