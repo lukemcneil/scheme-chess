@@ -91,9 +91,8 @@
   (set! b (apply-moves (algebraic->move "e5d6" b) b))
   (draw-board (state-board b)))
 
-(algebraic->move "e1g1" (get-starting-board-state))
-
 (define (get-best-move previous-moves)
+  (printf "info get best move with ~d\n" previous-moves)
   (let ([state (get-starting-board-state)])
     (for-each
      (lambda (move)
@@ -102,7 +101,8 @@
     (display "info ")
     (draw-board (state-board state))
     (let ([moves (get-possible-moves state)])
-      (let ([best (choose-move-minimax-alpha-beta-with-depth 4 moves state)])
+      ;;TODO: send best move twice with 5
+      (let ([best (choose-move-minimax-alpha-beta-with-depth-one-call 5 moves state)])
         (string-append
          (move->algebraic ((if (eq? 'en-passant (move-name (car best))) cadr car)
                            best))
@@ -113,14 +113,20 @@
            [(4 12) "n"]
            [else ""]))))))
 
-(let loop ()
-  (let ([input (string-split (get-line (current-input-port)))])
-    (case (car input)
-      [("uci") (display "uciok\n")]
-      [("isready") (display "readyok\n")]
-      [("position")
-       (if (string=? (cadr input) "startpos")
-           (if (and (not (null? (cddr input))) (string=? (caddr input) "moves"))
-               (display (string-append "bestmove " (get-best-move (cdddr input)) "\n"))
-               (display (string-append "bestmove " (get-best-move '()) "\n"))))])
-    (loop)))
+(let ([last-length 0])
+  (let loop ()
+    (let ([input (string-split (get-line (current-input-port)))])
+      (case (car input)
+        [("uci") (display "uciok\n")]
+        [("isready") (display "readyok\n")]
+        [("position")
+         (if (string=? (cadr input) "startpos")
+             (if (and (not (null? (cddr input))) (string=? (caddr input) "moves"))
+                 (if (= (length (cdddr input)) last-length)
+                     (display "info ignoring because sent twice\n")
+                     (begin
+                       (display (string-append "bestmove " (get-best-move (cdddr input)) "\n"))
+                       (set! last-length (length (cdddr input)))))
+                 (display (string-append "bestmove " (get-best-move '()) "\n"))))]
+        [else (printf "info unrecognized command ~d\n" (car input))])
+      (loop))))

@@ -1,0 +1,30 @@
+(define (choose-random-move moves current-state)
+  (list-ref moves (random (length moves))))
+
+(define (choose-best-material-move moves state)
+  (let ([color (state-color state)])
+    (let helper ([moves (cdr moves)]
+                 [m (evaluate-material (apply-moves-on-new-copy (car moves) state))]
+                 [best-move (car moves)]
+                 [best-moves (list (car moves))])
+      (if (null? moves)
+          (choose-random-move best-moves state)
+          (let* ([new-state (apply-moves-on-new-copy (car moves) state)]
+                 [eval (evaluate-material new-state 0)])
+            (cond
+             [((if (eq? color 'w) > <) eval m)
+              (helper (cdr moves) eval (car moves) (list (car moves)))]
+             [(= eval m) (helper (cdr moves) m best-move (cons (car moves) best-moves))]
+             [else (helper (cdr moves) m best-move best-moves)]))))))
+
+(define (choose-human-move moves current-state)
+  (display "from: ")
+  (call-with-values (lambda () (algebraic->indices (symbol->string (read))))
+    (lambda (from-x from-y)
+      (display "to: ")
+      (call-with-values (lambda () (algebraic->indices (symbol->string (read))))
+        (lambda (to-x to-y)
+          (list (make-move (make-position from-x from-y)
+                           (make-position to-x to-y)
+                           #f
+                           #f)))))))

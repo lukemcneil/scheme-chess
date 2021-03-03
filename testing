@@ -1,0 +1,2 @@
+#!/bin/bash
+tee /tmp/input.txt | /home/luke/chess/uci-communicator.ss | tee /tmp/output.txt

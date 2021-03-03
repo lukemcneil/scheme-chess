@@ -23,6 +23,42 @@
      (char- first #\a)
      (- 8 (- (char->integer second) 48)))))
 
+(define (get-possibilities starting-state starting-depth)
+  (let helper ([to-search (list (cons starting-state starting-depth))] [total 0])
+    (if (null? to-search)
+        total
+        (let ([state (caar to-search)]
+              [depth (cdar to-search)])
+          (if (= 0 depth)
+              0
+              (let ([color (state-color state)])
+                (let ([moves (get-possible-moves state)])
+                  (if (= 1 depth)
+                      (begin
+                        #;(for-each
+                         (lambda (move)
+                           ;;(display "\033c")
+                           ;;(draw-board (state-board (apply-moves-on-new-copy move state)))
+                           ;;(sleep (make-time 'time-duration 1000000 0))
+                           (cond
+                            [(eq? (move-name (car move)) 'en-passant)
+                             (set! en-passant-count (1+ en-passant-count))]
+                            [(eq? (move-name (car move)) 'castle)
+                             (set! castle-count (1+ castle-count))])
+                           (let ([to (move-to (car move))])
+                             (when (matrix-ref (state-board state) (position-x to) (position-y to))
+                               (set! capture-count (1+ capture-count)))))
+                         moves)
+                        (helper (cdr to-search) (+ total (length moves))))
+                      (let ([new-to-search
+                             (map
+                              (lambda (move)
+                                (cons (apply-moves-on-new-copy move state)
+                                      (1- depth)))
+                              moves)])
+                        (helper (append new-to-search (cdr to-search))
+                                total))))))))))
+
 (define (fen->state fen)
   (let* ([parts
           (let split-at-spaces ([ls (string->list fen)] [acc '()])
@@ -112,5 +148,6 @@
     (list 'position-6 (get-position-6-state) 2 2079)
     (list 'position-6 (get-position-6-state) 3 89890)
     (list 'position-6 (get-position-6-state) 4 3894594))))
+
 
 ;;(run-tests)
