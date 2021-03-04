@@ -709,13 +709,13 @@
   (let ([real first-move])
     (if (= depth 0)
         (begin
-          (set! counter (1+ counter))
+          ;;(set! counter (1+ counter))
           (values (evaluate-material state depth)
                   first-move))
         (let ([moves (get-possible-moves state)])
           (if (null? moves)
               (begin
-                (set! counter (1+ counter))
+                ;;(set! counter (1+ counter))
                 (values (evaluate-material-with-no-more-moves state depth) first-move))
               (let ([value (if max? -inf.0 +inf.0)])
                 (call/cc
@@ -761,11 +761,13 @@
           [(-1) (helper (1- n) white-wins (1+ black-wins) stalemates)]
           [(0) (helper (1- n) white-wins black-wins (1+ stalemates))]))))
 
+;;(choose-best-move 3 (get-possible-moves (get-starting-board-state)) (get-starting-board-state))
+
 #;(play-one-game (get-starting-board-state)
                (make-minimax-alpha-beta-chooser-with-depth-one-call 4)
                (make-minimax-alpha-beta-chooser-with-depth 2))
 
-(let ([depth 4])
+#;(let ([depth 4])
   (define s (get-position-6-state))
   (set! counter 0)
   (time

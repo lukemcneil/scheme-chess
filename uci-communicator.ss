@@ -102,7 +102,7 @@
     (draw-board (state-board state))
     (let ([moves (get-possible-moves state)])
       ;;TODO: send best move twice with 5
-      (let ([best (choose-move-minimax-alpha-beta-with-depth-one-call 5 moves state)])
+      (let ([best (choose-best-move 4 moves state)])
         (string-append
          (move->algebraic ((if (eq? 'en-passant (move-name (car best))) cadr car)
                            best))
