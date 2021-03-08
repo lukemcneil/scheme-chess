@@ -101,6 +101,7 @@
                                    (make-position x (if (= y 2) (1+ y) (1- y)))
                                    #f
                                    #f))))
+                '()
                 (member #\K fen-castle-states)
                 (member #\Q fen-castle-states)
                 (member #\k fen-castle-states)

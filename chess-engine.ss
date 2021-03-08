@@ -1,7 +1,9 @@
 (begin
   (define seed (time-nanosecond (current-time)))
-  #;(random-seed 189936001)
+  #;(random-seed 582289181)
   (random-seed seed))
+
+(define counter 0)
 
 (define-record-type position
   (fields x y))
@@ -12,7 +14,7 @@
 (define empty-move (make-move (make-position 0 0) (make-position 0 0) #f #f))
 
 (define-record-type state
-  (fields color last-move castle-k-w castle-q-w castle-k-b castle-q-b board))
+  (fields color last-move moves castle-k-w castle-q-w castle-k-b castle-q-b board))
 
 (define white-king #b0000)
 (define white-queen #b0001)
@@ -453,6 +455,7 @@
           (if (null? moves)
               (make-state (other-color color)
                           last-move
+                          (cons last-move (state-moves state))
                           (if castle-k-w k-w #f)
                           (if castle-q-w q-w #f)
                           (if castle-k-b k-b #f)
@@ -486,7 +489,7 @@
 (define (apply-moves-on-new-copy moves state)
   (let* ([board (state-board state)]
          [new-board (copy-board board)]
-         [new-state (make-state (state-color state) (state-last-move state)
+         [new-state (make-state (state-color state) (state-last-move state) (state-moves state)
                                 (state-castle-k-w state) (state-castle-q-w state)
                                 (state-castle-k-b state) (state-castle-q-b state) new-board)])
     (apply-moves moves new-state)))
@@ -632,68 +635,94 @@
 (define (in-checkmate? color state)
   (and (in-check? color (state-board state))
        (null? (get-possible-moves state))))
-          
+
+(define (move-inverse? m1 m2)
+  (let* ([f1 m1]
+         [f2 m2]
+         [from1 (move-from f1)]
+         [to1 (move-to f1)]
+         [from2 (move-from f2)]
+         [to2 (move-to f2)])
+    (and (= (position-x from1) (position-x to2))
+         (= (position-y from1) (position-y to2))
+         (= (position-x to1) (position-x from2))
+         (= (position-y to1) (position-y from2)))))
+
+(define (is-repetition? moves)
+  (and
+   (not (null? moves))
+   (not (null? (cdr moves)))
+   (not (null? (cddr moves)))
+   (not (null? (cdddr moves)))
+   (not (null? (cddddr moves)))
+   (move-inverse? (car moves) (caddr moves))
+   (move-inverse? (cadr moves) (cadddr moves))))
+
 (define (evaluate-material state depth)
+  (set! counter (1+ counter))
   (let ([board (state-board state)]
         [color (state-color state)]
+        [moves (state-moves state)]
         [score 0]
         [king-w-x #f]
         [king-w-y #f]
         [king-b-x #f]
         [king-b-y #f]
         [major-piece-value 0])
-    (cond
-     [(in-checkmate? color state) (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))]
-     #;[(in-stalemate? color state) (if (eq? color 'b) -inf.0 +inf.0)]
-     [else
-      (begin
-        (do ((x 0 (1+ x))) ((= x 8))
-          (do ((y 0 (1+ y))) ((= y 8))
-            (let ([p (matrix-ref board x y)])
-              (when p
-                (let ([table-x (if (white? p) x (- 7 x))]
-                      [table-y (if (white? p) y (- 7 y))])
-                  (if (king? p)
-                      (if (white? p)
-                          (begin
-                            (set! king-w-x x)
-                            (set! king-w-y y))
-                          (begin
-                            (set! king-b-x x)
-                            (set! king-b-y y)))
-                      (set! score (+ score
-                                     ((if (white? p) + -)
-                                      (cond
-                                       [(king? p) 20000]
-                                       [(queen? p)
-                                        (set! major-piece-value (+ 4 major-piece-value))
-                                        (+ 900 (matrix-ref queen-table table-x table-y))]
-                                       [(rook? p)
-                                        (set! major-piece-value (+ 2 major-piece-value))
-                                        (+ 500 (matrix-ref rook-table table-x table-y))]
-                                       [(bishop? p)
-                                        (set! major-piece-value (+ 1 major-piece-value))
-                                        (+ 330 (matrix-ref bishop-table table-x table-y))]
-                                       [(knight? p)
-                                        (set! major-piece-value (+ 1 major-piece-value))
-                                        (+ 320 (matrix-ref knight-table table-x table-y))]
-                                       [(pawn? p) (+ 100 (matrix-ref pawn-table table-x table-y))]))))))))))
-        (set! score
-              (+ score
-                 (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
-                             king-w-x king-w-y)))
-        (set! score
-              (- score
-                 (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
-                             (- 7 king-b-x) (- 7 king-b-y))))
-        score)])))
+    (if (is-repetition? moves)
+        0
+        (cond
+         [(in-checkmate? color state) (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))]
+         #;[(in-stalemate? color state) (if (eq? color 'b) -inf.0 +inf.0)]
+         [else
+          (begin
+            (do ((x 0 (1+ x))) ((= x 8))
+              (do ((y 0 (1+ y))) ((= y 8))
+                (let ([p (matrix-ref board x y)])
+                  (when p
+                    (let ([table-x (if (white? p) x (- 7 x))]
+                          [table-y (if (white? p) y (- 7 y))])
+                      (if (king? p)
+                          (if (white? p)
+                              (begin
+                                (set! king-w-x x)
+                                (set! king-w-y y))
+                              (begin
+                                (set! king-b-x x)
+                                (set! king-b-y y)))
+                          (set! score (+ score
+                                         ((if (white? p) + -)
+                                          (cond
+                                           [(king? p) 20000]
+                                           [(queen? p)
+                                            (set! major-piece-value (+ 4 major-piece-value))
+                                            (+ 900 (matrix-ref queen-table table-x table-y))]
+                                           [(rook? p)
+                                            (set! major-piece-value (+ 2 major-piece-value))
+                                            (+ 500 (matrix-ref rook-table table-x table-y))]
+                                           [(bishop? p)
+                                            (set! major-piece-value (+ 1 major-piece-value))
+                                            (+ 330 (matrix-ref bishop-table table-x table-y))]
+                                           [(knight? p)
+                                            (set! major-piece-value (+ 1 major-piece-value))
+                                            (+ 320 (matrix-ref knight-table table-x table-y))]
+                                           [(pawn? p) (+ 100 (matrix-ref pawn-table table-x table-y))]))))))))))
+            (set! score
+                  (+ score
+                     (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
+                                 king-w-x king-w-y)))
+            (set! score
+                  (- score
+                     (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
+                                 (- 7 king-b-x) (- 7 king-b-y))))
+            score)]))))
 
 (define (evaluate-material-with-no-more-moves state depth)
   (let ([board (state-board state)]
         [color (state-color state)])
     (if (in-check? color board)
         (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))
-        (if (eq? color 'b) -inf.0 +inf.0))))
+        0)))
 
 (define (make-best-move-chooser-with-depth depth)
   (lambda (moves state)
@@ -717,37 +746,35 @@
               (begin
                 ;;(set! counter (1+ counter))
                 (values (evaluate-material-with-no-more-moves state depth) first-move))
-              (let ([value (if max? -inf.0 +inf.0)])
-                (call/cc
-                 (lambda (k)
-                   (for-each
-                    (lambda (move)
-                      (call-with-values (lambda () (alpha-beta
-                                                    (apply-moves-on-new-copy move state)
-                                                    (not max?)
-                                                    (1- depth)
-                                                    alpha
-                                                    beta
-                                                    (if first-move first-move move)))
-                        (lambda (child-val child-first-move)
-                          (when (and ((if max? < >) value child-val) (not first-move))
-                            (set! real child-first-move))
-                          (set! value ((if max? max min) value child-val))
-                          (if max?
-                              (set! alpha (max alpha value))
-                              (set! beta (min beta value)))
-                          (when (>= alpha beta)
-                            (k #f)))))
-                    (begin
-                      (sort (lambda (m1 m2) (or (eq? 'capture (move-name (car m1)))
-                                                (eq? 'promotion (move-name (car m1))))) moves)
-                      #;moves
-                      #;(if (> depth 2)
-                          (get-possible-moves-sorted-by-alpha-beta state (- depth 2))
-                          (sort (lambda (m1 m2) (eq? 'capture (move-name (car m1)))) moves))))))
-                (if (not first-move)
-                    (values value real)
-                    (values value first-move))))))))
+              (if (is-repetition? (state-moves state))
+                  (values 0 first-move)
+                  (let ([value (if max? -inf.0 +inf.0)])
+                    (call/cc
+                     (lambda (k)
+                       (for-each
+                        (lambda (move)
+                          (call-with-values (lambda () (alpha-beta
+                                                        (apply-moves-on-new-copy move state)
+                                                        (not max?)
+                                                        (1- depth)
+                                                        alpha
+                                                        beta
+                                                        (if first-move first-move move)))
+                            (lambda (child-val child-first-move)
+                              (when (and ((if max? < >) value child-val) (not first-move))
+                                (set! real child-first-move))
+                              (set! value ((if max? max min) value child-val))
+                              (if max?
+                                  (set! alpha (max alpha value))
+                                  (set! beta (min beta value)))
+                              (when (>= alpha beta)
+                                (k #f)))))
+                        (begin
+                          (sort (lambda (m1 m2) (or (eq? 'capture (move-name (car m1)))
+                                                    (eq? 'promotion (move-name (car m1))))) moves)))))
+                    (if (not first-move)
+                        (values value real)
+                        (values value first-move)))))))))
 
 (define (play-games n)
   (let helper ([n n] [white-wins 0] [black-wins 0] [stalemates 0])
@@ -763,13 +790,14 @@
 
 ;;(choose-best-move 3 (get-possible-moves (get-starting-board-state)) (get-starting-board-state))
 
-#;(play-one-game (get-starting-board-state)
-               (make-minimax-alpha-beta-chooser-with-depth-one-call 4)
-               (make-minimax-alpha-beta-chooser-with-depth 2))
+#;(play-one-game (fen->state "2r1k2r/pp1n1p2/6pp/4P3/1B4R1/P2P4/2PKQ1PP/q2R4 b k - 3 24")
+               (make-best-move-chooser-with-depth 5)
+               (make-best-move-chooser-with-depth 5))
 
-#;(let ([depth 4])
-  (define s (get-position-6-state))
+#;(let ([depth 5])
+  (define s (fen->state "r4rk1/pppb1ppp/4p3/1N6/PP5P/3P2P1/3B2Kb/2R2B2 b - - 2 22"))
   (set! counter 0)
+  (draw-board (state-board s))
   (time
    (pretty-print (choose-best-move depth (get-possible-moves s) s)))
   (pretty-print counter))

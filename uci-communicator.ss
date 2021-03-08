@@ -102,7 +102,7 @@
     (draw-board (state-board state))
     (let ([moves (get-possible-moves state)])
       ;;TODO: send best move twice with 5
-      (let ([best (choose-best-move 4 moves state)])
+      (let ([best (choose-best-move 5 moves state)])
         (string-append
          (move->algebraic ((if (eq? 'en-passant (move-name (car best))) cadr car)
                            best))
@@ -122,7 +122,7 @@
         [("position")
          (if (string=? (cadr input) "startpos")
              (if (and (not (null? (cddr input))) (string=? (caddr input) "moves"))
-                 (if (= (length (cdddr input)) last-length)
+                 (if #f#;(= (length (cdddr input)) last-length)
                      (display "info ignoring because sent twice\n")
                      (begin
                        (display (string-append "bestmove " (get-best-move (cdddr input)) "\n"))
