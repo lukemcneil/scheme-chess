@@ -100,7 +100,8 @@
                         (make-move (make-position x (if (= y 2) (1- y) (1+ y)))
                                    (make-position x (if (= y 2) (1+ y) (1- y)))
                                    #f
-                                   #f))))
+                                   #f
+                                   0))))
                 '()
                 (member #\K fen-castle-states)
                 (member #\Q fen-castle-states)

@@ -1,6 +1,5 @@
 (begin
-  (define seed (time-nanosecond (current-time)))
-  #;(random-seed 582289181)
+  (define seed (time-nanosecond (current-time)));; 335091634)
   (random-seed seed))
 
 (define counter 0)
@@ -9,9 +8,14 @@
   (fields x y))
 
 (define-record-type move
-  (fields from to promotion name))
+  (fields from to promotion name value))
 
-(define empty-move (make-move (make-position 0 0) (make-position 0 0) #f #f))
+(define empty-move (make-move (make-position 0 0) (make-position 0 0) #f #f 0))
+
+(define move-to-attacked 10)
+(define move-to-not-attacked 10)
+(define capture-at-attacked 50)
+(define capture-at-not-attacked 90)
 
 (define-record-type state
   (fields color last-move moves castle-k-w castle-q-w castle-k-b castle-q-b board))
@@ -254,6 +258,11 @@
          (and p
               (not (is-color? p color))))))
 
+(define (evaluate-whether-attacked x y color board attacked-value free-value)
+  (if (square-under-attack? x y color board)
+      attacked-value
+      free-value))
+
 (define (get-sliding-piece-moves x y color board directions)
   (let helper ([directions directions]
                [moving-x x]
@@ -269,7 +278,8 @@
                 (cons (list (make-move (make-position x y)
                                        (make-position new-x new-y)
                                        #f
-                                       'move))
+                                       'move
+                                       (evaluate-whether-attacked new-x new-y color board move-to-attacked move-to-not-attacked)))
                       (helper directions new-x new-y))]
                [(is-color? (matrix-ref board new-x new-y) color)
                 (helper (cdr directions) x y)]
@@ -277,7 +287,8 @@
                 (cons (list (make-move (make-position x y)
                                        (make-position new-x new-y)
                                        #f
-                                       'capture))
+                                       'capture
+                                       (evaluate-whether-attacked new-x new-y color board capture-at-attacked capture-at-not-attacked)))
                       (helper (cdr directions) x y))])
               (helper (cdr directions) x y))))))
 
@@ -289,7 +300,12 @@
               [new-y (+ y (cadar possibilities))])
           (if (square-empty-or-capturable-and-on-board? new-x new-y color board)
               (cons
-               (list (make-move (make-position x y) (make-position new-x new-y) #f 'unknown))
+               (let ([p (matrix-ref board new-x new-y)])
+                 (if (and p (is-color? p (other-color color)))
+                     (list (make-move (make-position x y) (make-position new-x new-y) #f 'capture
+                                      (evaluate-whether-attacked new-x new-y color board capture-at-attacked capture-at-not-attacked)))
+                     (list (make-move (make-position x y) (make-position new-x new-y) #f 'move
+                                      (evaluate-whether-attacked new-x new-y color board move-to-attacked move-to-not-attacked)))))
                (helper (cdr possibilities)))
               (helper (cdr possibilities)))))))
 
@@ -302,7 +318,12 @@
                [new-y (+ y (cadar possibilities))])
            (if (square-empty-or-capturable-and-on-board? new-x new-y color board)
                (cons
-                (list (make-move (make-position x y) (make-position new-x new-y) #f 'unknown))
+                (let ([p (matrix-ref board new-x new-y)])
+                  (if (and p (is-color? p (other-color color)))
+                      (list (make-move (make-position x y) (make-position new-x new-y) #f 'capture
+                                       (evaluate-whether-attacked new-x new-y color board capture-at-attacked capture-at-not-attacked)))
+                      (list (make-move (make-position x y) (make-position new-x new-y) #f 'move
+                                       (evaluate-whether-attacked new-x new-y color board move-to-attacked move-to-not-attacked)))))
                 (helper (cdr possibilities)))
                (helper (cdr possibilities))))))
    (let get-castle-k ()
@@ -313,8 +334,8 @@
           (not (square-under-attack? (1+ x) y color board))
           (square-empty-and-on-board? (+ 2 x) y board)
           (not (square-under-attack? (+ 2 x) y color board)))
-         (list (list (make-move (make-position x y) (make-position (+ 2 x) y) #f 'castle)
-                     (make-move (make-position (+ 3 x) y) (make-position (+ 1 x) y) #f 'castle)))
+         (list (list (make-move (make-position x y) (make-position (+ 2 x) y) #f 'castle 70)
+                     (make-move (make-position (+ 3 x) y) (make-position (+ 1 x) y) #f 'castle 70)))
          '()))
    (let get-castle-q ()
      (if (and
@@ -325,18 +346,19 @@
           (square-empty-and-on-board? (- x 2) y board)
           (not (square-under-attack? (- x 2) y color board))
           (square-empty-and-on-board? (- x 3) y board))
-         (list (list (make-move (make-position x y) (make-position (- x 2) y) #f 'castle)
-                     (make-move (make-position (- 4 x) y) (make-position (1- x) y) #f 'castle)))
+         (list (list (make-move (make-position x y) (make-position (- x 2) y) #f 'castle 70)
+                     (make-move (make-position (- 4 x) y) (make-position (1- x) y) #f 'castle 70)))
          '()))))
 
-(define (get-promotion-list from-x from-y to-x to-y color)
+(define (get-promotion-list from-x from-y to-x to-y color board)
   (map
    (lambda (p)
      (list (make-move (make-position from-x from-y)
                       (make-position to-x to-y)
                       (+ (if (eq? color 'w) 0 8)
                          p)
-                      'promotion)))
+                      'promotion
+                      (evaluate-whether-attacked to-x to-y color board 70 (if (queen? p) 100 50)))))
    (list white-queen white-rook white-knight white-bishop)))
 
 (define (get-pawn-moves x y last-move color board)
@@ -351,11 +373,12 @@
     (append
      (if (square-empty-and-on-board? x (next-square-proc y) board)
          (if (= (next-square-proc y) promotion-square)
-             (get-promotion-list x y x (next-square-proc y) color)
+             (get-promotion-list x y x (next-square-proc y) color board)
              (list (list (make-move (make-position x y)
                                     (make-position x (next-square-proc y))
                                     #f
-                                    'move))))
+                                    'move
+                                    (evaluate-whether-attacked x (next-square-proc y) color board move-to-attacked move-to-not-attacked)))))
          '())
      (if (and (= y starting-square)
               (square-empty-and-on-board? x (next-square-proc (next-square-proc y)) board)
@@ -363,23 +386,27 @@
          (list (list (make-move (make-position x y)
                                 (make-position x (next-square-proc (next-square-proc y)))
                                 #f
-                                'move)))
+                                'move
+                                (evaluate-whether-attacked x (next-square-proc (next-square-proc y))
+                                                  color board move-to-attacked move-to-not-attacked))))
          '())
      (if (square-capturable-and-on-board? (1+ x) (next-square-proc y) color board)
          (if (= (next-square-proc y) promotion-square)
-             (get-promotion-list x y (1+ x) (next-square-proc y) color)
+             (get-promotion-list x y (1+ x) (next-square-proc y) color board)
              (list (list (make-move (make-position x y)
                                     (make-position (1+ x) (next-square-proc y))
                                     #f
-                                    'capture))))
+                                    'capture
+                                    (evaluate-whether-attacked (1+ x) (next-square-proc y) color board capture-at-attacked capture-at-not-attacked)))))
          '())
      (if (square-capturable-and-on-board? (1- x) (next-square-proc y) color board)
          (if (= (next-square-proc y) promotion-square)
-             (get-promotion-list x y (1- x) (next-square-proc y) color)
+             (get-promotion-list x y (1- x) (next-square-proc y) color board)
              (list (list (make-move (make-position x y)
                                     (make-position (1- x) (next-square-proc y))
                                     #f
-                                    'capture))))
+                                    'capture
+                                    (evaluate-whether-attacked (1- x) (next-square-proc y) color board capture-at-attacked capture-at-not-attacked)))))
          '())
      (if (and (= y en-passant-square)
               (= last-move-to-x (1+ x))
@@ -392,11 +419,13 @@
                 (make-move (make-position (1+ x) (next-square-proc y))
                            (make-position (1+ x) y)
                            #f
-                           'en-passant)
+                           'en-passant
+                           (evaluate-whether-attacked (1+ x) (next-square-proc y) color board capture-at-attacked capture-at-not-attacked))
                 (make-move (make-position x y)
                            (make-position (1+ x) (next-square-proc y))
                            #f
-                           'en-passant)))
+                           'en-passant
+                           (evaluate-whether-attacked (1+ x) (next-square-proc y) color board capture-at-attacked capture-at-not-attacked))))
          '())
      (if (and (= y en-passant-square)
               (= last-move-to-x (1- x))
@@ -409,11 +438,13 @@
                 (make-move (make-position (1- x) (next-square-proc y))
                            (make-position (1- x) y)
                            #f
-                           'en-passant)
+                           'en-passant
+                           (evaluate-whether-attacked (1- x) (next-square-proc y) color board capture-at-attacked capture-at-not-attacked))
                 (make-move (make-position x y)
                            (make-position (1- x) (next-square-proc y))
                            #f
-                           'en-passant)))
+                           'en-passant
+                           (evaluate-whether-attacked (1- x) (next-square-proc y) color board capture-at-attacked capture-at-not-attacked))))
          '()))))
 
 (define (get-changed-castle-info move)
@@ -715,7 +746,10 @@
                   (- score
                      (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
                                  (- 7 king-b-x) (- 7 king-b-y))))
-            score)]))))
+            (let ([noise 30])
+              (+ score
+                 (random noise)
+                 (- (/ noise 2)))))]))))
 
 (define (evaluate-material-with-no-more-moves state depth)
   (let ([board (state-board state)]
@@ -732,6 +766,7 @@
   (call-with-values (lambda () (alpha-beta state (eq? (state-color state) 'w) depth -inf.0 +inf.0 #f))
     (lambda (best-val best-move)
       (printf "info evaluation from one call ~d: ~d\n" (state-color state) best-val)
+      ;;(pretty-print (reverse (map move->algebraic (state-moves state))))
       best-move)))
 
 (define (alpha-beta state max? depth alpha beta first-move)
@@ -746,7 +781,7 @@
               (begin
                 ;;(set! counter (1+ counter))
                 (values (evaluate-material-with-no-more-moves state depth) first-move))
-              (if (is-repetition? (state-moves state))
+              (if (and (is-repetition? (state-moves state)) first-move)
                   (values 0 first-move)
                   (let ([value (if max? -inf.0 +inf.0)])
                     (call/cc
@@ -770,8 +805,11 @@
                               (when (>= alpha beta)
                                 (k #f)))))
                         (begin
-                          (sort (lambda (m1 m2) (or (eq? 'capture (move-name (car m1)))
-                                                    (eq? 'promotion (move-name (car m1))))) moves)))))
+                          (sort (lambda (m1 m2)
+                                  (> (move-value (car m1)) (move-value (car m2)))
+                                  #;(or (eq? 'capture (move-name (car m1)))
+                                      (eq? 'promotion (move-name (car m1)))
+                                      (eq? 'en-passant (move-name (car m1))))) moves)))))
                     (if (not first-move)
                         (values value real)
                         (values value first-move)))))))))
@@ -788,11 +826,100 @@
           [(-1) (helper (1- n) white-wins (1+ black-wins) stalemates)]
           [(0) (helper (1- n) white-wins black-wins (1+ stalemates))]))))
 
-;;(choose-best-move 3 (get-possible-moves (get-starting-board-state)) (get-starting-board-state))
+(define (position->algebraic position)
+  (let ([x (position-x position)]
+        [y (position-y position)])
+    (let ([f (integer->char (+ 97 x))]
+          [s (integer->char (+ 48 (- 8 y)))])
+      (string f s))))
 
-#;(play-one-game (fen->state "2r1k2r/pp1n1p2/6pp/4P3/1B4R1/P2P4/2PKQ1PP/q2R4 b k - 3 24")
-               (make-best-move-chooser-with-depth 5)
-               (make-best-move-chooser-with-depth 5))
+(define (move->algebraic move)
+  (string-append (position->algebraic (move-from move)) (position->algebraic (move-to move))))
+
+(define (algebraic->move str state)
+  (let* ([last-move-from (move-from (state-last-move state))]
+         [last-move-to (move-to (state-last-move state))]
+         [castle-k-w (state-castle-k-w state)]
+         [castle-q-w (state-castle-q-w state)]
+         [castle-k-b (state-castle-k-b state)]
+         [castle-q-b (state-castle-q-b state)]
+         [board (state-board state)]
+         [color (state-color state)]
+         [next-square-proc (if (eq? color 'w) 1- 1+)])
+    (let ([from-str (substring str 0 2)] [to-str (substring str 2 4)])
+      (call-with-values (lambda () (algebraic->indices from-str))
+        (lambda (from-x from-y)
+          (call-with-values (lambda () (algebraic->indices to-str))
+            (lambda (to-x to-y)
+              (let ([promotion (if (> (string-length str) 4)
+                                   (begin (pretty-print (string-ref str 4))
+                                          (+
+                                           (if (eq? color 'b) 8 0)
+                                           (case (string-ref str 4)
+                                             [(#\q) white-queen]
+                                             [(#\r) white-rook]
+                                             [(#\b) white-bishop]
+                                             [(#\n) white-knight])))
+                                   #f)])
+                (append
+                 (if (and (pawn? (matrix-ref board from-x from-y))
+                          (= (position-x last-move-to) to-x)
+                          (= (position-x last-move-from) to-x)
+                          (= (position-y last-move-to) from-y)
+                          (= (position-y last-move-from) (next-square-proc to-y))
+                          (not (= to-x from-x)))
+                     (list (make-move (make-position to-x to-y) (make-position to-x from-y) #f #f 0))
+                     '())
+                 (list (make-move (make-position from-x from-y)
+                                  (make-position to-x to-y)
+                                  promotion
+                                  #f
+                                  0))
+                 (if (and (string=? "e1g1" str) castle-k-w)
+                     (list (make-move (make-position 7 7) (make-position 5 7) #f #f 0))
+                     '())
+                 (if (and (string=? "e1c1" str) castle-q-w)
+                     (list (make-move (make-position 0 7) (make-position 3 7) #f #f 0))
+                     '())
+                 (if (and (string=? "e8g8" str) castle-k-b)
+                     (list (make-move (make-position 7 0) (make-position 5 0) #f #f 0))
+                     '())
+                 (if (and (string=? "e8c8" str) castle-q-b)
+                     (list (make-move (make-position 0 0) (make-position 3 0) #f #f 0))
+                     '()))))))))))
+
+#;(let ([s (get-starting-board-state)])
+  (for-each
+   (lambda (str)
+     (let ([move (algebraic->move str s)])
+       (newline)
+       (printf "last move: ~d\n" (state-last-move s))
+       (pretty-print move)
+       (set! s (apply-moves move s))))
+   '("b1c3" "g8f6" "g1f3" "b8c6" "e2e3" "e7e6" "h2h4" "f8b4"
+     "c3e2" "h8f8" "a2a3" "b4d6" "d2d4" "h7h6" "e2c3" "f6d5"
+     "c3d5" "e6d5" "c2c4" "d5c4" "f1c4" "d8f6" "d4d5" "c6e5"
+     "c4b3" "e5f3" "g2f3" "d6e5" "b3c2" "f6b6" "a1b1" "b6a5"
+     "e1e2" "d7d6" "b2b4" "a5b5" "c2d3" "b5b6" "d1g1" "c8d7"
+     "f3f4" "e5f6" "g1g3" "d7b5" "e3e4" "a8e8" "g3f3" "e8d8"
+     "e2f1" "b5d3" "f3d3" "b6a6" "b4b5" "a6a5" "c1d2" "a5b6"
+     "d2e3" "b6a5" "e3d2" "a5b6" "d2e3" "b6a5" "h4h5" "a5c3"
+     "f1e2" "c3d3" "e2d3" "a7a6" "b1c1" "c7c5" "b5c6"))
+  (draw-board (state-board s)))
+
+#;(let ([s (get-starting-board-state)])
+  (set! counter 0)
+  (choose-best-move 5 (get-possible-moves s) s)
+  (printf "counter: ~d\n" counter))
+
+#;(do ((x 0 (1+ x))) ((= x 1000))
+  (play-one-game (get-starting-board-state)
+                 (make-best-move-chooser-with-depth 5)
+(make-best-move-chooser-with-depth 5)))
+
+#;(time (play-one-game (get-starting-board-state)
+                     (make-best-move-chooser-with-depth 5)
+                     (make-best-move-chooser-with-depth 6)))
 
 #;(let ([depth 5])
   (define s (fen->state "r4rk1/pppb1ppp/4p3/1N6/PP5P/3P2P1/3B2Kb/2R2B2 b - - 2 22"))
