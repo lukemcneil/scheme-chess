@@ -763,11 +763,12 @@
     (choose-best-move depth moves state)))
 
 (define (choose-best-move depth moves state)
+  ;;(printf "info in choose-best-move at d=~d\n" depth)
   (call-with-values (lambda () (alpha-beta state (eq? (state-color state) 'w) depth -inf.0 +inf.0 #f))
     (lambda (best-val best-move)
-      (printf "info evaluation from one call ~d: ~d\n" (state-color state) best-val)
+      ;;(printf "info score cp ~d depth ~d\n" (exact (floor best-val)) depth)
       ;;(pretty-print (reverse (map move->algebraic (state-moves state))))
-      best-move)))
+      (cons best-val best-move))))
 
 (define (alpha-beta state max? depth alpha beta first-move)
   (let ([real first-move])
