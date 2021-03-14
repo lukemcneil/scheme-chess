@@ -36,34 +36,63 @@
             [furthest-evaluation #f]
             [mutex (make-mutex)]
             [done #f])
-        (for-each
-         (lambda (i)
-           (fork-thread
-            (lambda ()
-              (let loop ([engine (make-engine (lambda () (choose-best-move i moves state)))])
-                (mutex-acquire mutex)
-                (if done
-                    (mutex-release mutex)
-                    (begin
-                      (mutex-release mutex)
-                      (engine 1000000
-                              (lambda (fuel-left result)
-                                (let ([best-val (car result)] [best-move (cdr result)])
-                                  (with-mutex mutex
-                                              #;(printf "info depth ~d\n" i)
-                                              #;(printf "info score cp ~d\n"
-                                                      (exact (floor best-val)))
-                                              (set! best best-move)
-                                              (set! furthest-depth i)
-                                              (set! furthest-evaluation best-val))))
-                              (lambda (new-engine)
-                                (loop new-engine)))))))))
-         (map 1+ (iota 10)))
-        (sleep-seconds 3)
+        ;; (for-each
+        ;;  (lambda (i)
+        ;;    (fork-thread
+        ;;     (lambda ()
+        ;;       (let loop ([engine (make-engine (lambda () (choose-best-move i moves state)))])
+        ;;         (mutex-acquire mutex)
+        ;;         (if done
+        ;;             (mutex-release mutex)
+        ;;             (begin
+        ;;               (mutex-release mutex)
+        ;;               (engine 1000000
+        ;;                       (lambda (fuel-left result)
+        ;;                         (let ([best-val (car result)] [best-move (cdr result)])
+        ;;                           (with-mutex mutex
+        ;;                                       #;(printf "info depth ~d\n" i)
+        ;;                                       #;(printf "info score cp ~d\n"
+        ;;                                               (exact (floor best-val)))
+        ;;                                       (set! best best-move)
+        ;;                                       (set! furthest-depth i)
+        ;;                                       (set! furthest-evaluation best-val))))
+        ;;                       (lambda (new-engine)
+        ;;                         (loop new-engine)))))))))
+        ;;  (map 1+ (iota 8)))
+        (set! counter 0)
+        (fork-thread
+         (lambda ()
+           (let loop ([engine (make-engine (lambda () (choose-best-move 1 moves state #f)))]
+                      [i 1])
+             (mutex-acquire mutex)
+             (if done
+                 (mutex-release mutex)
+                 (begin
+                   (mutex-release mutex)
+                   (engine 1000000
+                           (lambda (fuel-left result)
+                             (let ([best-val (car result)]
+                                   [best-move (cadr result)]
+                                   [move-values (cddr result)])
+                               (with-mutex mutex
+                                           (printf "info depth ~d\n" i)
+                                           (printf "info score cp ~d\n" (exact (floor best-val)))
+                                           (printf "info d ~d found best move ~d\n" i
+                                                   (move->algebraic (car best-move)))
+                                           (set! furthest-evaluation best-val)
+                                           (set! best best-move)
+                                           (set! furthest-depth i))
+                               (loop (make-engine
+                                      (lambda () (choose-best-move (1+ i) moves state move-values)))
+                                     (1+ i))))
+                           (lambda (new-engine)
+                             (loop new-engine i))))))))
+        (sleep-seconds 1)
         (with-mutex mutex
                     (set! done #t)
-                    ;;(printf "info depth ~d\n" furthest-depth)
-                    ;;(printf "info score cp ~d\n" furthest-evaluation)
+                    (printf "info looked at ~d\n" counter)
+                    (printf "info depth ~d\n" furthest-depth)
+                    (printf "info score cp ~d\n" (exact (floor furthest-evaluation)))
                     (string-append
                      (move->algebraic ((if (eq? 'en-passant (move-name (car best))) cadr car)
                                        best))

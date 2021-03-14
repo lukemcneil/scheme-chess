@@ -549,7 +549,7 @@
               (if (in-check? color board)
                   (if (equal? color 'w) -1 1)
                   0)
-              (let ([selected-move ((if (eq? color 'w) p1 p2) moves state)])
+              (let ([selected-move (cdr ((if (eq? color 'w) p1 p2) moves state))])
                 (let ([new-state (apply-moves selected-move state)])
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
                   ;;(display "\033c")
@@ -746,7 +746,7 @@
                   (- score
                      (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
                                  (- 7 king-b-x) (- 7 king-b-y))))
-            (let ([noise 30])
+            (let ([noise 1])
               (+ score
                  (random noise)
                  (- (/ noise 2)))))]))))
@@ -762,58 +762,72 @@
   (lambda (moves state)
     (choose-best-move depth moves state)))
 
-(define (choose-best-move depth moves state)
-  ;;(printf "info in choose-best-move at d=~d\n" depth)
-  (call-with-values (lambda () (alpha-beta state (eq? (state-color state) 'w) depth -inf.0 +inf.0 #f))
-    (lambda (best-val best-move)
+(define (choose-best-move depth moves state first-move-values)
+  (call-with-values
+      (lambda ()
+        (alpha-beta state (eq? (state-color state) 'w) depth -inf.0 +inf.0 #f
+                    (if first-move-values
+                        (map cdr
+                             (sort (lambda (p1 p2)
+                                     (> (car p1) (car p2)))
+                                   (map cons first-move-values moves)))
+                        ;;                        (sort (lambda (m1 m2)
+                        ;;                                (> (move-value (car m1))
+                        ;;                                   (move-value (car m2))))
+                        ;;                              (get-possible-moves state))
+                        (get-possible-moves state))))
+    (lambda (best-val best-move move-values)
       ;;(printf "info score cp ~d depth ~d\n" (exact (floor best-val)) depth)
       ;;(pretty-print (reverse (map move->algebraic (state-moves state))))
-      (cons best-val best-move))))
+      (cons* best-val best-move move-values))))
 
-(define (alpha-beta state max? depth alpha beta first-move)
-  (let ([real first-move])
+(define (alpha-beta state max? depth alpha beta first-move moves)
+  (let ([real first-move]
+        [move-values '()])
     (if (= depth 0)
-        (begin
-          ;;(set! counter (1+ counter))
-          (values (evaluate-material state depth)
-                  first-move))
-        (let ([moves (get-possible-moves state)])
-          (if (null? moves)
-              (begin
-                ;;(set! counter (1+ counter))
-                (values (evaluate-material-with-no-more-moves state depth) first-move))
-              (if (and (is-repetition? (state-moves state)) first-move)
-                  (values 0 first-move)
-                  (let ([value (if max? -inf.0 +inf.0)])
-                    (call/cc
-                     (lambda (k)
-                       (for-each
-                        (lambda (move)
-                          (call-with-values (lambda () (alpha-beta
-                                                        (apply-moves-on-new-copy move state)
-                                                        (not max?)
-                                                        (1- depth)
-                                                        alpha
-                                                        beta
-                                                        (if first-move first-move move)))
-                            (lambda (child-val child-first-move)
-                              (when (and ((if max? < >) value child-val) (not first-move))
-                                (set! real child-first-move))
-                              (set! value ((if max? max min) value child-val))
-                              (if max?
-                                  (set! alpha (max alpha value))
-                                  (set! beta (min beta value)))
-                              (when (>= alpha beta)
-                                (k #f)))))
-                        (begin
-                          (sort (lambda (m1 m2)
-                                  (> (move-value (car m1)) (move-value (car m2)))
-                                  #;(or (eq? 'capture (move-name (car m1)))
-                                      (eq? 'promotion (move-name (car m1)))
-                                      (eq? 'en-passant (move-name (car m1))))) moves)))))
-                    (if (not first-move)
-                        (values value real)
-                        (values value first-move)))))))))
+        (values (evaluate-material state depth) first-move)
+        (if (null? moves)
+            (values (evaluate-material-with-no-more-moves state depth) first-move)
+            (if (and (is-repetition? (state-moves state)) first-move)
+                (values 0 first-move)
+                (let ([value (if max? -inf.0 +inf.0)])
+                  (call/cc
+                   (lambda (k)
+                     (for-each
+                      (lambda (move)
+                        (call-with-values
+                            (let ([new-state (apply-moves-on-new-copy move state)])
+                              (lambda () (alpha-beta
+                                          new-state
+                                          (not max?)
+                                          (1- depth)
+                                          alpha
+                                          beta
+                                          (if first-move first-move move)
+                                          (if (= depth 1)
+                                              '()
+                                              (sort (lambda (m1 m2)
+                                                      ;;(or (eq? 'capture (move-name (car m1)))
+                                                      ;;(eq? 'promotion (move-name (car m1)))
+                                                      ;;(eq? 'en-passant (move-name (car m1))))
+                                                      (> (move-value (car m1))
+                                                         (move-value (car m2))))
+                                                    (get-possible-moves new-state))))))
+                          (lambda (child-val child-first-move)
+                            (when (not first-move)
+                              (set! move-values (cons child-val move-values))
+                              (when ((if max? < >) value child-val)
+                                (set! real child-first-move)))
+                            (set! value ((if max? max min) value child-val))
+                            (if max?
+                                (set! alpha (max alpha value))
+                                (set! beta (min beta value)))
+                            (when (>= alpha beta)
+                              (k #f)))))
+                      moves)))
+                  (if (not first-move)
+                      (values value real (reverse move-values))
+                      (values value first-move))))))))
 
 (define (play-games n)
   (let helper ([n n] [white-wins 0] [black-wins 0] [stalemates 0])
@@ -919,8 +933,8 @@
 (make-best-move-chooser-with-depth 5)))
 
 #;(time (play-one-game (get-starting-board-state)
-                     (make-best-move-chooser-with-depth 5)
-                     (make-best-move-chooser-with-depth 6)))
+                     (make-best-move-chooser-with-depth 4)
+                     (make-best-move-chooser-with-depth 4)))
 
 #;(let ([depth 5])
   (define s (fen->state "r4rk1/pppb1ppp/4p3/1N6/PP5P/3P2P1/3B2Kb/2R2B2 b - - 2 22"))
@@ -928,4 +942,16 @@
   (draw-board (state-board s))
   (time
    (pretty-print (choose-best-move depth (get-possible-moves s) s)))
+  (pretty-print counter))
+
+#;(let ([s (get-starting-board-state)])
+  (set! counter 0)
+  (time
+   (pretty-print
+    (call-with-values (lambda ()
+                        (choose-best-move 5 (get-possible-moves s) s
+                                          ;;#f
+                                          '(-0.5 -0.5 14.5 -10.5 9.5 4.5 39.5 59.5 59.5 69.5 19.5 39.5 34.5 39.5 49.5 44.5 69.5 54.5 54.5 69.5)
+                                          ))
+      list)))
   (pretty-print counter))
