@@ -3,6 +3,7 @@
   (random-seed seed))
 
 (define counter 0)
+(define hash-counter 0)
 
 (define-record-type position
   (fields x y))
@@ -122,6 +123,7 @@
     (vector-set! (vector-ref m j) i x)))
 
 (load "/home/luke/chess/chess-engine-tests.ss")
+(load "/home/luke/chess/zobrist.ss")
 
 (define (draw-board board)
   (newline)
@@ -689,67 +691,86 @@
    (move-inverse? (car moves) (caddr moves))
    (move-inverse? (cadr moves) (cadddr moves))))
 
-(define (evaluate-material state depth)
-  (set! counter (1+ counter))
-  (let ([board (state-board state)]
-        [color (state-color state)]
-        [moves (state-moves state)]
-        [score 0]
-        [king-w-x #f]
-        [king-w-y #f]
-        [king-b-x #f]
-        [king-b-y #f]
-        [major-piece-value 0])
-    (if (is-repetition? moves)
-        0
-        (cond
-         [(in-checkmate? color state) (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))]
-         #;[(in-stalemate? color state) (if (eq? color 'b) -inf.0 +inf.0)]
-         [else
+(define evaluation-hashtable (make-eq-hashtable))
+
+(define evaluate-material
+  (lambda (state depth)
+    (let* ([hash (hash-state state)]
+           [previous (hashtable-ref evaluation-hashtable hash #f)])
+      (if previous
+          previous
           (begin
-            (do ((x 0 (1+ x))) ((= x 8))
-              (do ((y 0 (1+ y))) ((= y 8))
-                (let ([p (matrix-ref board x y)])
-                  (when p
-                    (let ([table-x (if (white? p) x (- 7 x))]
-                          [table-y (if (white? p) y (- 7 y))])
-                      (if (king? p)
-                          (if (white? p)
-                              (begin
-                                (set! king-w-x x)
-                                (set! king-w-y y))
-                              (begin
-                                (set! king-b-x x)
-                                (set! king-b-y y)))
-                          (set! score (+ score
-                                         ((if (white? p) + -)
-                                          (cond
-                                           [(king? p) 20000]
-                                           [(queen? p)
-                                            (set! major-piece-value (+ 4 major-piece-value))
-                                            (+ 900 (matrix-ref queen-table table-x table-y))]
-                                           [(rook? p)
-                                            (set! major-piece-value (+ 2 major-piece-value))
-                                            (+ 500 (matrix-ref rook-table table-x table-y))]
-                                           [(bishop? p)
-                                            (set! major-piece-value (+ 1 major-piece-value))
-                                            (+ 330 (matrix-ref bishop-table table-x table-y))]
-                                           [(knight? p)
-                                            (set! major-piece-value (+ 1 major-piece-value))
-                                            (+ 320 (matrix-ref knight-table table-x table-y))]
-                                           [(pawn? p) (+ 100 (matrix-ref pawn-table table-x table-y))]))))))))))
-            (set! score
-                  (+ score
-                     (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
-                                 king-w-x king-w-y)))
-            (set! score
-                  (- score
-                     (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
-                                 (- 7 king-b-x) (- 7 king-b-y))))
-            (let ([noise 1])
-              (+ score
-                 (random noise)
-                 (- (/ noise 2)))))]))))
+            (set! counter (1+ counter))
+            (let ([board (state-board state)]
+                  [color (state-color state)]
+                  [moves (state-moves state)]
+                  [score 0]
+                  [king-w-x #f]
+                  [king-w-y #f]
+                  [king-b-x #f]
+                  [king-b-y #f]
+                  [major-piece-value 0])
+              (if (is-repetition? moves)
+                  0
+                  (cond
+                   [(in-checkmate? color state) (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))]
+                   #;[(in-stalemate? color state) (if (eq? color 'b) -inf.0 +inf.0)]
+                   [else
+                    (begin
+                      (do ((x 0 (1+ x))) ((= x 8))
+                        (do ((y 0 (1+ y))) ((= y 8))
+                          (let ([p (matrix-ref board x y)])
+                            (when p
+                              (let ([table-x (if (white? p) x (- 7 x))]
+                                    [table-y (if (white? p) y (- 7 y))])
+                                (if (king? p)
+                                    (if (white? p)
+                                        (begin
+                                          (set! king-w-x x)
+                                          (set! king-w-y y))
+                                        (begin
+                                          (set! king-b-x x)
+                                          (set! king-b-y y)))
+                                    (set! score
+                                          (+ score
+                                             ((if (white? p) + -)
+                                              (cond
+                                               [(king? p) 20000]
+                                               [(queen? p)
+                                                (set! major-piece-value (+ 4 major-piece-value))
+                                                (+ 900 (matrix-ref queen-table table-x table-y))]
+                                               [(rook? p)
+                                                (set! major-piece-value (+ 2 major-piece-value))
+                                                (+ 500 (matrix-ref rook-table table-x table-y))]
+                                               [(bishop? p)
+                                                (set! major-piece-value (+ 1 major-piece-value))
+                                                (+ 330 (matrix-ref bishop-table table-x table-y))]
+                                               [(knight? p)
+                                                (set! major-piece-value (+ 1 major-piece-value))
+                                                (+ 320 (matrix-ref knight-table table-x table-y))]
+                                               [(pawn? p) (+ 100 (matrix-ref pawn-table table-x table-y))]))))))))))
+                      (set! score
+                            (+ score
+                               (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
+                                           king-w-x king-w-y)))
+                      (set! score
+                            (- score
+                               (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
+                                           (- 7 king-b-x) (- 7 king-b-y))))
+                      (let ([noise 1])
+                        (let ([result 
+                               (+ score
+                                  (random noise)
+                                  (- (/ noise 2)))])
+                          (hashtable-set! evaluation-hashtable hash result)
+                          (printf "setting ~d\n" result)
+                          result)))]))))))))
+
+(let* ([s (get-starting-board-state)])
+  ;;(time (evaluate-material s 0))
+  (set! counter 0) (set! hash-counter 0)
+  (time (choose-best-move 6 (get-possible-moves s) s #f))
+  (printf "evaluated positions: ~d\nhashed: ~d\n" counter hash-counter))
 
 (define (evaluate-material-with-no-more-moves state depth)
   (let ([board (state-board state)]

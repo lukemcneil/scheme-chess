@@ -87,7 +87,7 @@
                                      (1+ i))))
                            (lambda (new-engine)
                              (loop new-engine i))))))))
-        (sleep-seconds 1)
+        (sleep-seconds .6)
         (with-mutex mutex
                     (set! done #t)
                     (printf "info looked at ~d\n" counter)
