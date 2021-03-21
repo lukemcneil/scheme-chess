@@ -19,7 +19,7 @@
 (define capture-at-not-attacked 90)
 
 (define-record-type state
-  (fields color last-move moves castle-k-w castle-q-w castle-k-b castle-q-b board))
+  (fields color last-move moves castle-k-w castle-q-w castle-k-b castle-q-b board hash))
 
 (define white-king #b0000)
 (define white-queen #b0001)
@@ -390,7 +390,7 @@
                                 #f
                                 'move
                                 (evaluate-whether-attacked x (next-square-proc (next-square-proc y))
-                                                  color board move-to-attacked move-to-not-attacked))))
+                                                           color board move-to-attacked move-to-not-attacked))))
          '())
      (if (square-capturable-and-on-board? (1+ x) (next-square-proc y) color board)
          (if (= (next-square-proc y) promotion-square)
@@ -474,42 +474,45 @@
                     (and (= to-x 0) (and (= to-y 0)))))])
       (values castle-k-w castle-q-w castle-k-b castle-q-b))))
 
-(define (apply-moves moves state)
-  (call-with-values (lambda () (get-changed-castle-info (car moves)))
-    (lambda (k-w q-w k-b q-b)
-      (let helper ([moves moves]
-                   [last-move #f])
-        (let ([board (state-board state)]
-              [color (state-color state)]
-              [castle-k-w (state-castle-k-w state)]
-              [castle-q-w (state-castle-q-w state)]
-              [castle-k-b (state-castle-k-b state)]
-              [castle-q-b (state-castle-q-b state)])
-          (if (null? moves)
-              (make-state (other-color color)
-                          last-move
-                          (cons last-move (state-moves state))
-                          (if castle-k-w k-w #f)
-                          (if castle-q-w q-w #f)
-                          (if castle-k-b k-b #f)
-                          (if castle-q-b q-b #f)
-                          board)
-              (let ([to (move-to (car moves))]
-                    [from (move-from (car moves))]
-                    [promotion (move-promotion (car moves))])
-                (matrix-set! board
-                             (position-x to)
-                             (position-y to)
-                             (if promotion
-                                 promotion
-                                 (matrix-ref board
-                                             (position-x from)
-                                             (position-y from))))
-                (matrix-set! board
-                             (position-x from)
-                             (position-y from)
-                             #f)
-                (helper (cdr moves) (car moves)))))))))
+(define (apply-moves original-moves state)
+  (let ([new-hash (apply-moves-to-hash original-moves (state-board state) (state-hash state))])
+    (call-with-values (lambda () (get-changed-castle-info (car original-moves)))
+      (lambda (k-w q-w k-b q-b)
+        (let helper ([moves original-moves]
+                     [last-move #f])
+          (let ([board (state-board state)]
+                [color (state-color state)]
+                [castle-k-w (state-castle-k-w state)]
+                [castle-q-w (state-castle-q-w state)]
+                [castle-k-b (state-castle-k-b state)]
+                [castle-q-b (state-castle-q-b state)]
+                [hash (state-hash state)])
+            (if (null? moves)
+                (make-state (other-color color)
+                            last-move
+                            (cons last-move (state-moves state))
+                            (if castle-k-w k-w #f)
+                            (if castle-q-w q-w #f)
+                            (if castle-k-b k-b #f)
+                            (if castle-q-b q-b #f)
+                            board
+                            new-hash)
+                (let ([to (move-to (car moves))]
+                      [from (move-from (car moves))]
+                      [promotion (move-promotion (car moves))])
+                  (matrix-set! board
+                               (position-x to)
+                               (position-y to)
+                               (if promotion
+                                   promotion
+                                   (matrix-ref board
+                                               (position-x from)
+                                               (position-y from))))
+                  (matrix-set! board
+                               (position-x from)
+                               (position-y from)
+                               #f)
+                  (helper (cdr moves) (car moves))))))))))
 
 (define (copy-board board)
   (let ([new-board (make-vector 8 #f)])
@@ -524,7 +527,8 @@
          [new-board (copy-board board)]
          [new-state (make-state (state-color state) (state-last-move state) (state-moves state)
                                 (state-castle-k-w state) (state-castle-q-w state)
-                                (state-castle-k-b state) (state-castle-q-b state) new-board)])
+                                (state-castle-k-b state) (state-castle-q-b state) new-board
+                                (state-hash state))])
     (apply-moves moves new-state)))
 
 (define (insufficient-material? state)
@@ -551,7 +555,8 @@
               (if (in-check? color board)
                   (if (equal? color 'w) -1 1)
                   0)
-              (let ([selected-move (cdr ((if (eq? color 'w) p1 p2) moves state))])
+              (let ([selected-move ((if (eq? color 'w) p1 p2) moves state)])
+                (printf "move ~d\n" selected-move)
                 (let ([new-state (apply-moves selected-move state)])
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
                   ;;(display "\033c")
@@ -695,10 +700,15 @@
 
 (define evaluate-material
   (lambda (state depth)
-    (let* ([hash (hash-state state)]
+    (set! hash-counter (1+ hash-counter))
+    (let* ([hash (state-hash state)]
            [previous (hashtable-ref evaluation-hashtable hash #f)])
+      ;;(printf "evaluating board with hash ~d\n" hash)
       (if previous
-          previous
+          (begin
+            ;;(draw-board (state-board state))
+            ;;(printf "hash ~d previous: ~d\n" hash (inexact previous))
+            previous)
           (begin
             (set! counter (1+ counter))
             (let ([board (state-board state)]
@@ -763,14 +773,22 @@
                                   (random noise)
                                   (- (/ noise 2)))])
                           (hashtable-set! evaluation-hashtable hash result)
-                          (printf "setting ~d\n" result)
+                          ;;(printf "setting ~d\n" result)
+                          #;(let ([previous (hashtable-ref evaluation-hashtable hash #f)])
+                          (when (and previous (not (= result previous)))
+                          (draw-board (state-board state))
+                          (printf "matches: ~d\n" hash)))
+                          #;(when (= result 639.5)
+                            (draw-board (state-board state))
+                            (printf "this is the duplicate ~d\n" hash))
                           result)))]))))))))
 
-(let* ([s (get-starting-board-state)])
-  ;;(time (evaluate-material s 0))
-  (set! counter 0) (set! hash-counter 0)
-  (time (choose-best-move 6 (get-possible-moves s) s #f))
-  (printf "evaluated positions: ~d\nhashed: ~d\n" counter hash-counter))
+#;(let* ([s (get-position-4-state)])
+(draw-board (state-board s))
+;;(time (evaluate-material s 0))
+(set! counter 0) (set! hash-counter 0)
+(time (choose-best-move 6 (get-possible-moves s) s #f))
+(printf "evaluated positions not including hash: ~d\ntotal evaluated: ~d\n" counter hash-counter))
 
 (define (evaluate-material-with-no-more-moves state depth)
   (let ([board (state-board state)]
@@ -781,7 +799,7 @@
 
 (define (make-best-move-chooser-with-depth depth)
   (lambda (moves state)
-    (choose-best-move depth moves state)))
+    (cadr (choose-best-move depth moves state #f))))
 
 (define (choose-best-move depth moves state first-move-values)
   (call-with-values
@@ -888,14 +906,14 @@
           (call-with-values (lambda () (algebraic->indices to-str))
             (lambda (to-x to-y)
               (let ([promotion (if (> (string-length str) 4)
-                                   (begin (pretty-print (string-ref str 4))
-                                          (+
-                                           (if (eq? color 'b) 8 0)
-                                           (case (string-ref str 4)
-                                             [(#\q) white-queen]
-                                             [(#\r) white-rook]
-                                             [(#\b) white-bishop]
-                                             [(#\n) white-knight])))
+                                   (begin ;;(pretty-print (string-ref str 4))
+                                     (+
+                                      (if (eq? color 'b) 8 0)
+                                      (case (string-ref str 4)
+                                        [(#\q) white-queen]
+                                        [(#\r) white-rook]
+                                        [(#\b) white-bishop]
+                                        [(#\n) white-knight])))
                                    #f)])
                 (append
                  (if (and (pawn? (matrix-ref board from-x from-y))
@@ -925,54 +943,53 @@
                      '()))))))))))
 
 #;(let ([s (get-starting-board-state)])
-  (for-each
-   (lambda (str)
-     (let ([move (algebraic->move str s)])
-       (newline)
-       (printf "last move: ~d\n" (state-last-move s))
-       (pretty-print move)
-       (set! s (apply-moves move s))))
-   '("b1c3" "g8f6" "g1f3" "b8c6" "e2e3" "e7e6" "h2h4" "f8b4"
-     "c3e2" "h8f8" "a2a3" "b4d6" "d2d4" "h7h6" "e2c3" "f6d5"
-     "c3d5" "e6d5" "c2c4" "d5c4" "f1c4" "d8f6" "d4d5" "c6e5"
-     "c4b3" "e5f3" "g2f3" "d6e5" "b3c2" "f6b6" "a1b1" "b6a5"
-     "e1e2" "d7d6" "b2b4" "a5b5" "c2d3" "b5b6" "d1g1" "c8d7"
-     "f3f4" "e5f6" "g1g3" "d7b5" "e3e4" "a8e8" "g3f3" "e8d8"
-     "e2f1" "b5d3" "f3d3" "b6a6" "b4b5" "a6a5" "c1d2" "a5b6"
-     "d2e3" "b6a5" "e3d2" "a5b6" "d2e3" "b6a5" "h4h5" "a5c3"
-     "f1e2" "c3d3" "e2d3" "a7a6" "b1c1" "c7c5" "b5c6"))
-  (draw-board (state-board s)))
+(for-each
+(lambda (str)
+(let ([move (algebraic->move str s)])
+(newline)
+(printf "last move: ~d\n" (state-last-move s))
+(pretty-print move)
+(set! s (apply-moves move s))))
+'("b1c3" "g8f6" "g1f3" "b8c6" "e2e3" "e7e6" "h2h4" "f8b4"
+"c3e2" "h8f8" "a2a3" "b4d6" "d2d4" "h7h6" "e2c3" "f6d5"
+"c3d5" "e6d5" "c2c4" "d5c4" "f1c4" "d8f6" "d4d5" "c6e5"
+"c4b3" "e5f3" "g2f3" "d6e5" "b3c2" "f6b6" "a1b1" "b6a5"
+"e1e2" "d7d6" "b2b4" "a5b5" "c2d3" "b5b6" "d1g1" "c8d7"
+"f3f4" "e5f6" "g1g3" "d7b5" "e3e4" "a8e8" "g3f3" "e8d8"
+"e2f1" "b5d3" "f3d3" "b6a6" "b4b5" "a6a5" "c1d2" "a5b6"
+"d2e3" "b6a5" "e3d2" "a5b6" "d2e3" "b6a5" "h4h5" "a5c3"
+"f1e2" "c3d3" "e2d3" "a7a6" "b1c1" "c7c5" "b5c6"))
+(draw-board (state-board s)))
 
 #;(let ([s (get-starting-board-state)])
-  (set! counter 0)
-  (choose-best-move 5 (get-possible-moves s) s)
-  (printf "counter: ~d\n" counter))
+(set! counter 0)
+(choose-best-move 5 (get-possible-moves s) s)
+(printf "counter: ~d\n" counter))
 
 #;(do ((x 0 (1+ x))) ((= x 1000))
-  (play-one-game (get-starting-board-state)
-                 (make-best-move-chooser-with-depth 5)
+(play-one-game (get-starting-board-state)
+(make-best-move-chooser-with-depth 5)
 (make-best-move-chooser-with-depth 5)))
 
 #;(time (play-one-game (get-starting-board-state)
-                     (make-best-move-chooser-with-depth 4)
-                     (make-best-move-chooser-with-depth 4)))
+(make-best-move-chooser-with-depth 5)
+(make-best-move-chooser-with-depth 5)))
 
-#;(let ([depth 5])
-  (define s (fen->state "r4rk1/pppb1ppp/4p3/1N6/PP5P/3P2P1/3B2Kb/2R2B2 b - - 2 22"))
+(let ([depth 5])
+  (define s (fen->state "r1bq3r/ppp2kpp/2n5/2b1p3/8/P1P2N2/1PP2PPP/R1BQK2R w KQ - 0 9"))
   (set! counter 0)
-  (draw-board (state-board s))
-  (time
-   (pretty-print (choose-best-move depth (get-possible-moves s) s)))
-  (pretty-print counter))
+  (set! hash-counter 0)
+  (time (pretty-print (choose-best-move depth (get-possible-moves s) s #f)))
+  (printf "~d, ~d\n" counter hash-counter))
 
 #;(let ([s (get-starting-board-state)])
-  (set! counter 0)
-  (time
-   (pretty-print
-    (call-with-values (lambda ()
-                        (choose-best-move 5 (get-possible-moves s) s
-                                          ;;#f
-                                          '(-0.5 -0.5 14.5 -10.5 9.5 4.5 39.5 59.5 59.5 69.5 19.5 39.5 34.5 39.5 49.5 44.5 69.5 54.5 54.5 69.5)
-                                          ))
-      list)))
-  (pretty-print counter))
+(set! counter 0)
+(time
+(pretty-print
+(call-with-values (lambda ()
+(choose-best-move 5 (get-possible-moves s) s
+;;#f
+'(-0.5 -0.5 14.5 -10.5 9.5 4.5 39.5 59.5 59.5 69.5 19.5 39.5 34.5 39.5 49.5 44.5 69.5 54.5 54.5 69.5)
+))
+list)))
+(pretty-print counter))

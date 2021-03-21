@@ -92,22 +92,30 @@
              [#\P (matrix-set! board x y white-pawn) (set! x (1+ x))]
              [#\/ (set! x 0) (set! y (1+ y))])))
      fen-board)
-    (make-state (if (char=? (car fen-color) #\w) 'w 'b)
-                (if (char=? #\- (car fen-en-passant))
-                    empty-move
-                    (call-with-values (lambda () (algebraic->indices (list->string fen-en-passant)))
-                      (lambda (x y)
-                        (make-move (make-position x (if (= y 2) (1- y) (1+ y)))
-                                   (make-position x (if (= y 2) (1+ y) (1- y)))
-                                   #f
-                                   #f
-                                   0))))
-                '()
-                (member #\K fen-castle-states)
-                (member #\Q fen-castle-states)
-                (member #\k fen-castle-states)
-                (member #\q fen-castle-states)
-                board)))
+    (let ([color (if (char=? (car fen-color) #\w) 'w 'b)]
+          [last-move
+           (if (char=? #\- (car fen-en-passant))
+               empty-move
+               (call-with-values (lambda () (algebraic->indices (list->string fen-en-passant)))
+                 (lambda (x y)
+                   (make-move (make-position x (if (= y 2) (1- y) (1+ y)))
+                              (make-position x (if (= y 2) (1+ y) (1- y)))
+                              #f
+                              #f
+                              0))))]
+          [castle-k-w (member #\K fen-castle-states)]
+          [castle-q-w (member #\Q fen-castle-states)]
+          [castle-k-b (member #\k fen-castle-states)]
+          [castle-q-b (member #\q fen-castle-states)])
+      (make-state color
+                  last-move
+                  '()
+                  castle-k-w
+                  castle-q-w
+                  castle-k-b
+                  castle-q-b
+                  board
+                  (get-hash board last-move castle-k-w castle-q-w castle-k-b castle-q-b color)))))
 
 (define (run-tests)
   (for-each
@@ -152,4 +160,4 @@
     (list 'position-6 (get-position-6-state) 4 3894594))))
 
 
-;;(run-tests)
+;;(time (run-tests))
