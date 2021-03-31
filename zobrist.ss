@@ -1,4 +1,4 @@
-(define big (expt 2 50))
+(define big (expt 2 55))
 
 (define zobrist-piece-constants
   (make-vector 64 #f))

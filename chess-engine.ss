@@ -475,18 +475,20 @@
       (values castle-k-w castle-q-w castle-k-b castle-q-b))))
 
 (define (apply-moves original-moves state)
-  (let ([new-hash (apply-moves-to-hash original-moves (state-board state) (state-hash state))])
-    (call-with-values (lambda () (get-changed-castle-info (car original-moves)))
-      (lambda (k-w q-w k-b q-b)
-        (let helper ([moves original-moves]
-                     [last-move #f])
-          (let ([board (state-board state)]
-                [color (state-color state)]
-                [castle-k-w (state-castle-k-w state)]
-                [castle-q-w (state-castle-q-w state)]
-                [castle-k-b (state-castle-k-b state)]
-                [castle-q-b (state-castle-q-b state)]
-                [hash (state-hash state)])
+  (call-with-values (lambda () (get-changed-castle-info (car original-moves)))
+    (lambda (k-w q-w k-b q-b)
+      (let ([board (state-board state)]
+            [color (state-color state)]
+            [castle-k-w (state-castle-k-w state)]
+            [castle-q-w (state-castle-q-w state)]
+            [castle-k-b (state-castle-k-b state)]
+            [castle-q-b (state-castle-q-b state)]
+            [hash (state-hash state)])
+        ;;TODO- pass changed castle info and last-move to apply-moves-to-hash
+        (let ([new-hash (apply-moves-to-hash original-moves (state-board state) (state-hash state))])
+          (let helper ([moves original-moves]
+                       [last-move #f])
+
             (if (null? moves)
                 (make-state (other-color color)
                             last-move
@@ -551,6 +553,8 @@
         (let* ([board (state-board state)]
                [color (state-color state)]
                [moves (get-possible-moves state)])
+          (set! counter 0)
+          (set! hash-counter 0)
           (if (null? moves)
               (if (in-check? color board)
                   (if (equal? color 'w) -1 1)
@@ -564,6 +568,7 @@
                   (printf "possible moves: ~d\n" (length moves))
                   (printf "move number: ~d\n" move-count)
                   (printf "seed: ~d\n" seed)
+                  ;;(printf "~d, ~d\n" counter hash-counter)
                   (sleep (make-time 'time-duration 100000000 0))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
                   (helper new-state (1+ move-count)))))))))
@@ -696,21 +701,24 @@
    (move-inverse? (car moves) (caddr moves))
    (move-inverse? (cadr moves) (cadddr moves))))
 
+(define-structure (transposition evaluation depth))
+
 (define evaluation-hashtable (make-eq-hashtable))
 
 (define evaluate-material
   (lambda (state depth)
-    (set! hash-counter (1+ hash-counter))
+    ;;(set! hash-counter (1+ hash-counter))
     (let* ([hash (state-hash state)]
            [previous (hashtable-ref evaluation-hashtable hash #f)])
       ;;(printf "evaluating board with hash ~d\n" hash)
-      (if previous
+      (if (and previous (>= (transposition-depth previous) depth))
           (begin
             ;;(draw-board (state-board state))
             ;;(printf "hash ~d previous: ~d\n" hash (inexact previous))
-            previous)
+            (transposition-evaluation previous))
           (begin
-            (set! counter (1+ counter))
+            ;;(draw-board (state-board state))
+            ;;(set! counter (1+ counter))
             (let ([board (state-board state)]
                   [color (state-color state)]
                   [moves (state-moves state)]
@@ -720,88 +728,94 @@
                   [king-b-x #f]
                   [king-b-y #f]
                   [major-piece-value 0])
-              (if (is-repetition? moves)
-                  0
-                  (cond
-                   [(in-checkmate? color state) (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))]
-                   #;[(in-stalemate? color state) (if (eq? color 'b) -inf.0 +inf.0)]
-                   [else
-                    (begin
-                      (do ((x 0 (1+ x))) ((= x 8))
-                        (do ((y 0 (1+ y))) ((= y 8))
-                          (let ([p (matrix-ref board x y)])
-                            (when p
-                              (let ([table-x (if (white? p) x (- 7 x))]
-                                    [table-y (if (white? p) y (- 7 y))])
-                                (if (king? p)
-                                    (if (white? p)
-                                        (begin
-                                          (set! king-w-x x)
-                                          (set! king-w-y y))
-                                        (begin
-                                          (set! king-b-x x)
-                                          (set! king-b-y y)))
-                                    (set! score
-                                          (+ score
-                                             ((if (white? p) + -)
-                                              (cond
-                                               [(king? p) 20000]
-                                               [(queen? p)
-                                                (set! major-piece-value (+ 4 major-piece-value))
-                                                (+ 900 (matrix-ref queen-table table-x table-y))]
-                                               [(rook? p)
-                                                (set! major-piece-value (+ 2 major-piece-value))
-                                                (+ 500 (matrix-ref rook-table table-x table-y))]
-                                               [(bishop? p)
-                                                (set! major-piece-value (+ 1 major-piece-value))
-                                                (+ 330 (matrix-ref bishop-table table-x table-y))]
-                                               [(knight? p)
-                                                (set! major-piece-value (+ 1 major-piece-value))
-                                                (+ 320 (matrix-ref knight-table table-x table-y))]
-                                               [(pawn? p) (+ 100 (matrix-ref pawn-table table-x table-y))]))))))))))
-                      (set! score
-                            (+ score
-                               (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
-                                           king-w-x king-w-y)))
-                      (set! score
-                            (- score
-                               (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
-                                           (- 7 king-b-x) (- 7 king-b-y))))
-                      (let ([noise 1])
-                        (let ([result 
+              (let ([result 
+                     (if (is-repetition? moves)
+                         0
+                         (cond
+                          [(in-checkmate? color state) (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))]
+                          #;[(in-stalemate? color state) (if (eq? color 'b) -inf.0 +inf.0)]
+                          [else
+                           (begin
+                             (do ((x 0 (1+ x))) ((= x 8))
+                               (do ((y 0 (1+ y))) ((= y 8))
+                                 (let ([p (matrix-ref board x y)])
+                                   (when p
+                                     (let ([table-x (if (white? p) x (- 7 x))]
+                                           [table-y (if (white? p) y (- 7 y))])
+                                       (if (king? p)
+                                           (if (white? p)
+                                               (begin
+                                                 (set! king-w-x x)
+                                                 (set! king-w-y y))
+                                               (begin
+                                                 (set! king-b-x x)
+                                                 (set! king-b-y y)))
+                                           (set! score
+                                                 (+ score
+                                                    ((if (white? p) + -)
+                                                     (cond
+                                                      [(king? p) 20000]
+                                                      [(queen? p)
+                                                       (set! major-piece-value (+ 4 major-piece-value))
+                                                       (+ 900 (matrix-ref queen-table table-x table-y))]
+                                                      [(rook? p)
+                                                       (set! major-piece-value (+ 2 major-piece-value))
+                                                       (+ 500 (matrix-ref rook-table table-x table-y))]
+                                                      [(bishop? p)
+                                                       (set! major-piece-value (+ 1 major-piece-value))
+                                                       (+ 330 (matrix-ref bishop-table table-x table-y))]
+                                                      [(knight? p)
+                                                       (set! major-piece-value (+ 1 major-piece-value))
+                                                       (+ 320 (matrix-ref knight-table table-x table-y))]
+                                                      [(pawn? p) (+ 100 (matrix-ref pawn-table table-x table-y))]))))))))))
+                             (set! score
+                                   (+ score
+                                      (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
+                                                  king-w-x king-w-y)))
+                             (set! score
+                                   (- score
+                                      (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
+                                                  (- 7 king-b-x) (- 7 king-b-y))))
+                             (let ([noise 1])
                                (+ score
                                   (random noise)
-                                  (- (/ noise 2)))])
-                          (hashtable-set! evaluation-hashtable hash result)
-                          ;;(printf "setting ~d\n" result)
-                          #;(let ([previous (hashtable-ref evaluation-hashtable hash #f)])
-                          (when (and previous (not (= result previous)))
-                          (draw-board (state-board state))
-                          (printf "matches: ~d\n" hash)))
-                          #;(when (= result 639.5)
-                            (draw-board (state-board state))
-                            (printf "this is the duplicate ~d\n" hash))
-                          result)))]))))))))
+                                  (- (/ noise 2)))))]))])
+                (hashtable-set! evaluation-hashtable hash
+                                (make-transposition result depth))
+                result)))))))
+
+                
 
 #;(let* ([s (get-position-4-state)])
-(draw-board (state-board s))
-;;(time (evaluate-material s 0))
-(set! counter 0) (set! hash-counter 0)
-(time (choose-best-move 6 (get-possible-moves s) s #f))
-(printf "evaluated positions not including hash: ~d\ntotal evaluated: ~d\n" counter hash-counter))
+  (draw-board (state-board s))
+  ;;(time (evaluate-material s 0))
+  (set! counter 0) (set! hash-counter 0)
+  (time (choose-best-move 6 (get-possible-moves s) s #f))
+  (printf "evaluated positions not including hash: ~d\ntotal evaluated: ~d\n" counter hash-counter))
 
 (define (evaluate-material-with-no-more-moves state depth)
-  (let ([board (state-board state)]
-        [color (state-color state)])
-    (if (in-check? color board)
-        (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))
-        0)))
+  ;;(set! hash-counter (1+ hash-counter))
+  (let* ([hash (state-hash state)]
+         [previous (hashtable-ref evaluation-hashtable hash #f)])
+    ;;(printf "evaluating board with hash ~d\n" hash)
+    (if (and previous (>= (transposition-depth previous) depth))
+        (transposition-evaluation previous)
+        (let ([board (state-board state)]
+              [color (state-color state)])
+          ;;(set! counter (1+ counter))
+          (let ([evaluation (if (in-check? color board)
+                                (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))
+                                0)])
+            (hashtable-set! evaluation-hashtable hash
+                            (make-transposition evaluation depth))
+            evaluation)))))
 
 (define (make-best-move-chooser-with-depth depth)
   (lambda (moves state)
     (cadr (choose-best-move depth moves state #f))))
 
 (define (choose-best-move depth moves state first-move-values)
+  (set! evaluation-hashtable (make-eq-hashtable))
   (call-with-values
       (lambda ()
         (alpha-beta state (eq? (state-color state) 'w) depth -inf.0 +inf.0 #f
@@ -822,51 +836,58 @@
 
 (define (alpha-beta state max? depth alpha beta first-move moves)
   (let ([real first-move]
-        [move-values '()])
+        [move-values '()]
+        [hash (state-hash state)])
     (if (= depth 0)
         (values (evaluate-material state depth) first-move)
         (if (null? moves)
             (values (evaluate-material-with-no-more-moves state depth) first-move)
             (if (and (is-repetition? (state-moves state)) first-move)
                 (values 0 first-move)
-                (let ([value (if max? -inf.0 +inf.0)])
-                  (call/cc
-                   (lambda (k)
-                     (for-each
-                      (lambda (move)
-                        (call-with-values
-                            (let ([new-state (apply-moves-on-new-copy move state)])
-                              (lambda () (alpha-beta
-                                          new-state
-                                          (not max?)
-                                          (1- depth)
-                                          alpha
-                                          beta
-                                          (if first-move first-move move)
-                                          (if (= depth 1)
-                                              '()
-                                              (sort (lambda (m1 m2)
-                                                      ;;(or (eq? 'capture (move-name (car m1)))
-                                                      ;;(eq? 'promotion (move-name (car m1)))
-                                                      ;;(eq? 'en-passant (move-name (car m1))))
-                                                      (> (move-value (car m1))
-                                                         (move-value (car m2))))
-                                                    (get-possible-moves new-state))))))
-                          (lambda (child-val child-first-move)
-                            (when (not first-move)
-                              (set! move-values (cons child-val move-values))
-                              (when ((if max? < >) value child-val)
-                                (set! real child-first-move)))
-                            (set! value ((if max? max min) value child-val))
-                            (if max?
-                                (set! alpha (max alpha value))
-                                (set! beta (min beta value)))
-                            (when (>= alpha beta)
-                              (k #f)))))
-                      moves)))
-                  (if (not first-move)
-                      (values value real (reverse move-values))
-                      (values value first-move))))))))
+                (let ([value (if max? -inf.0 +inf.0)]
+                      [previous (hashtable-ref evaluation-hashtable hash #f)])
+                  (if (and previous (>= (transposition-depth previous) depth) first-move)
+                      (set! value (transposition-evaluation previous))
+                      (call/cc
+                       (lambda (k)
+                         (for-each
+                          (lambda (move)
+                            (call-with-values
+                                (let ([new-state (apply-moves-on-new-copy move state)])
+                                  (lambda () (alpha-beta
+                                              new-state
+                                              (not max?)
+                                              (1- depth)
+                                              alpha
+                                              beta
+                                              (if first-move first-move move)
+                                              (if (= depth 1)
+                                                  '()
+                                                  (sort (lambda (m1 m2)
+                                                          ;;(or (eq? 'capture (move-name (car m1)))
+                                                          ;;(eq? 'promotion (move-name (car m1)))
+                                                          ;;(eq? 'en-passant (move-name (car m1))))
+                                                          (> (move-value (car m1))
+                                                             (move-value (car m2))))
+                                                        (get-possible-moves new-state))))))
+                              (lambda (child-val child-first-move)
+                                (when (not first-move)
+                                  (set! move-values (cons child-val move-values))
+                                  (when ((if max? < >) value child-val)
+                                    (set! real child-first-move)))
+                                (set! value ((if max? max min) value child-val))
+                                (if max?
+                                    (set! alpha (max alpha value))
+                                    (set! beta (min beta value)))
+                                (when (>= alpha beta)
+                                  (k #f)))))
+                          moves))))
+                  (when first-move
+                    (hashtable-set! evaluation-hashtable hash
+                                    (make-transposition value depth)))
+                  (if first-move
+                      (values value first-move)
+                      (values value real (reverse move-values)))))))))
 
 (define (play-games n)
   (let helper ([n n] [white-wins 0] [black-wins 0] [stalemates 0])
@@ -971,11 +992,11 @@
 (make-best-move-chooser-with-depth 5)
 (make-best-move-chooser-with-depth 5)))
 
-#;(time (play-one-game (get-starting-board-state)
-(make-best-move-chooser-with-depth 5)
-(make-best-move-chooser-with-depth 5)))
+(time (play-one-game (fen->state "8/4k3/2P5/4K1p1/5p1p/1P6/6PP/8 b - - 0 1");;(get-starting-board-state)
+                     (make-best-move-chooser-with-depth 8)
+                     (make-best-move-chooser-with-depth 8)))
 
-(let ([depth 5])
+#;(let ([depth 5])
   (define s (fen->state "r1bq3r/ppp2kpp/2n5/2b1p3/8/P1P2N2/1PP2PPP/R1BQK2R w KQ - 0 9"))
   (set! counter 0)
   (set! hash-counter 0)
@@ -992,4 +1013,5 @@
 '(-0.5 -0.5 14.5 -10.5 9.5 4.5 39.5 59.5 59.5 69.5 19.5 39.5 34.5 39.5 49.5 44.5 69.5 54.5 54.5 69.5)
 ))
 list)))
-(pretty-print counter))
+(pretty-print counter)
+)
