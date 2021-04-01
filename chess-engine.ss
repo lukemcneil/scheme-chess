@@ -222,6 +222,13 @@
                     (vector->list board)
                     (iota (vector-length board))))))))
 
+(define (get-possible-captures state)
+  (let ([moves (get-possible-moves state)])
+    (filter
+     (lambda (move) (or (eq? (move-name (car move)) 'capture)
+                        (eq? (move-name (car move)) 'en-passant)))
+     moves)))
+
 (define (square-on-board? x y)
   (and (<= x 7)
        (>= x 0)
@@ -839,7 +846,21 @@
         [move-values '()]
         [hash (state-hash state)])
     (if (= depth 0)
-        (values (evaluate-material state depth) first-move)
+        (begin
+          #;(let* ([moves (get-possible-moves state)]
+                 [captures
+                  (filter
+                   (lambda (move) (or (eq? (move-name (car move)) 'capture)
+                                      (eq? (move-name (car move)) 'en-passant)))
+                   moves)])
+            (values (quiesce state max? depth -inf.0 (evaluate-material state depth) +inf.0 #f captures (not (null? moves)))
+                    first-move))
+          (values (evaluate-material state depth) first-move)
+          #;(values (quiesce state (sort-moves (get-possible-captures state))
+                           -inf.0
+                           +inf.0
+                           2)
+                  first-move))
         (if (null? moves)
             (values (evaluate-material-with-no-more-moves state depth) first-move)
             (if (and (is-repetition? (state-moves state)) first-move)
@@ -888,6 +909,103 @@
                   (if first-move
                       (values value first-move)
                       (values value real (reverse move-values)))))))))
+
+(define (sort-moves moves)
+  (sort (lambda (m1 m2)
+          ;;(or (eq? 'capture (move-name (car m1)))
+          ;;(eq? 'promotion (move-name (car m1)))
+          ;;(eq? 'en-passant (move-name (car m1))))
+          (> (move-value (car m1))
+             (move-value (car m2))))
+        moves))
+
+(define (quiesce state captures alpha beta depth)
+  (call/cc
+   (lambda (k)
+     (let ([stand-pat (evaluate-material state 0)])
+       #;(when (= depth 0)
+         (k (max alpha stand-pat)))
+       (when (>= stand-pat beta)
+         (k beta))
+       #;(when (< alpha stand-pat)
+       (set! alpha stand-pat))
+       (set! alpha (max alpha stand-pat))
+       (for-each
+        (lambda (capture)
+          (let* ([new-state (apply-moves-on-new-copy capture state)]
+                 [score (- (quiesce new-state
+                                    (sort-moves (get-possible-captures new-state))
+                                    (- beta)
+                                    (- alpha)
+                                    (1- depth)))])
+            (when (>= score beta)
+              (k beta))
+            #;(when (> score alpha)
+            (set! alpha score))
+            (set! alpha (max alpha stand-pat))))
+        captures)
+       alpha))))
+        
+
+;; (define (quiesce state max? depth alpha beta first-move captures has-moves?)
+;;   ;;(pretty-print depth)
+;;   (let ([real first-move]
+;;         [move-values '()]
+;;         [hash (state-hash state)])
+;;     (if (or (null? captures) (< depth -5))
+;;         (if has-moves?
+;;             (evaluate-material state depth)
+;;             (evaluate-material-with-no-more-moves state depth))
+;;         (if (and (is-repetition? (state-moves state)) first-move)
+;;             0
+;;             (let ([value (if max? -inf.0 +inf.0)]
+;;                   [previous (hashtable-ref evaluation-hashtable hash #f)])
+;;               (if (and previous (>= (transposition-depth previous) depth) first-move)
+;;                   (set! value (transposition-evaluation previous))
+;;                   (call/cc
+;;                    (lambda (k)
+;;                      (for-each
+;;                       (lambda (move)
+;;                         (let* ([new-state (apply-moves-on-new-copy move state)]
+;;                                [moves (get-possible-moves new-state)]
+;;                                [captures
+;;                                 (filter
+;;                                  (lambda (move) (or (eq? (move-name (car move)) 'capture)
+;;                                                     (eq? (move-name (car move)) 'en-passant)))
+;;                                  moves)]
+;;                                [child-val (quiesce
+;;                                            new-state
+;;                                            (not max?)
+;;                                            (1- depth)
+;;                                            alpha
+;;                                            beta
+;;                                            (if first-move first-move move)
+;;                                            (sort (lambda (m1 m2)
+;;                                                    ;;(or (eq? 'capture (move-name (car m1)))
+;;                                                    ;;(eq? 'promotion (move-name (car m1)))
+;;                                                    ;;(eq? 'en-passant (move-name (car m1))))
+;;                                                    (> (move-value (car m1))
+;;                                                       (move-value (car m2))))
+;;                                                  captures)
+;;                                            (not (null? moves)))])
+;;                           ;;(pretty-print depth)
+;;                           #;(when (not first-move)
+;;                           (set! move-values (cons child-val move-values)) ;
+;;                           (when ((if max? < >) value child-val) ;
+;;                           (set! real child-first-move)))
+;;                           (set! value ((if max? max min) value child-val))
+;;                           (if max?
+;;                               (set! alpha (max alpha value))
+;;                               (set! beta (min beta value)))
+;;                           (when (>= alpha beta)
+;;                             (k #f))))
+;;                       captures))))
+;;               (when first-move
+;;                 (hashtable-set! evaluation-hashtable hash
+;;                                 (make-transposition value depth)))
+;;               (if first-move
+;;                   value
+;;                   value))))))
 
 (define (play-games n)
   (let helper ([n n] [white-wins 0] [black-wins 0] [stalemates 0])
@@ -992,9 +1110,9 @@
 (make-best-move-chooser-with-depth 5)
 (make-best-move-chooser-with-depth 5)))
 
-(time (play-one-game (fen->state "8/4k3/2P5/4K1p1/5p1p/1P6/6PP/8 b - - 0 1");;(get-starting-board-state)
-                     (make-best-move-chooser-with-depth 8)
-                     (make-best-move-chooser-with-depth 8)))
+#;(time (play-one-game (get-starting-board-state) ;;(fen->state "8/4k3/2P5/4K1p1/5p1p/1P6/6PP/8 b - - 0 1")
+                     (make-best-move-chooser-with-depth 3)
+                     (make-best-move-chooser-with-depth 3)))
 
 #;(let ([depth 5])
   (define s (fen->state "r1bq3r/ppp2kpp/2n5/2b1p3/8/P1P2N2/1PP2PPP/R1BQK2R w KQ - 0 9"))
