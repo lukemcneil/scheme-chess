@@ -62,7 +62,7 @@
         (set! counter 0)
         (fork-thread
          (lambda ()
-           (let loop ([engine (make-engine (lambda () (choose-best-move 1 moves state #f)))]
+           (let loop ([engine (make-engine (lambda () (choose-best-move-ml 1 moves state #f)))]
                       [i 1])
              (mutex-acquire mutex)
              (if done
@@ -83,7 +83,7 @@
                                            (set! best best-move)
                                            (set! furthest-depth i))
                                (loop (make-engine
-                                      (lambda () (choose-best-move (1+ i) moves state move-values)))
+                                      (lambda () (choose-best-move-ml (1+ i) moves state move-values)))
                                      (1+ i))))
                            (lambda (new-engine)
                              (loop new-engine i))))))))

@@ -124,6 +124,7 @@
 
 (load "/home/luke/chess/chess-engine-tests.ss")
 (load "/home/luke/chess/zobrist.ss")
+(load "/home/luke/chess/machine-learning-evaluation.ss")
 
 (define (draw-board board)
   (newline)
@@ -758,7 +759,8 @@
                                                [(knight? p)
                                                 (set! major-piece-value (+ 1 major-piece-value))
                                                 (+ 320 (matrix-ref knight-table table-x table-y))]
-                                               [(pawn? p) (+ 100 (matrix-ref pawn-table table-x table-y))]))))))))))
+                                               [(pawn? p)
+                                                (+ 100 (matrix-ref pawn-table table-x table-y))]))))))))))
                       (set! score
                             (+ score
                                (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
@@ -767,7 +769,98 @@
                             (- score
                                (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
                                            (- 7 king-b-x) (- 7 king-b-y))))
-                      (let ([noise 1])
+                      (let ([noise 30])
+                        (let ([result 
+                               (+ score
+                                  (random noise)
+                                  (- (/ noise 2)))])
+                          (hashtable-set! evaluation-hashtable hash result)
+                          ;;(printf "setting ~d\n" result)
+                          #;(let ([previous (hashtable-ref evaluation-hashtable hash #f)])
+                          (when (and previous (not (= result previous)))
+                          (draw-board (state-board state))
+                          (printf "matches: ~d\n" hash)))
+                          #;(when (= result 639.5)
+                            (draw-board (state-board state))
+                            (printf "this is the duplicate ~d\n" hash))
+                          result)))]))))))))
+
+(define evaluate-material-ml
+  (lambda (state depth)
+    (set! hash-counter (1+ hash-counter))
+    (let* ([hash (state-hash state)]
+           [previous (hashtable-ref evaluation-hashtable hash #f)])
+      ;;(printf "evaluating board with hash ~d\n" hash)
+      (if previous
+          (begin
+            ;;(draw-board (state-board state))
+            ;;(printf "hash ~d previous: ~d\n" hash (inexact previous))
+            previous)
+          (begin
+            (set! counter (1+ counter))
+            (let ([board (state-board state)]
+                  [color (state-color state)]
+                  [moves (state-moves state)]
+                  [score 0]
+                  [king-w-x #f]
+                  [king-w-y #f]
+                  [king-b-x #f]
+                  [king-b-y #f]
+                  [major-piece-value 0])
+              (if (is-repetition? moves)
+                  0
+                  (cond
+                   [(in-checkmate? color state) (if (eq? color 'b) (+ 10000 depth) (- -10000 depth))]
+                   #;[(in-stalemate? color state) (if (eq? color 'b) -inf.0 +inf.0)]
+                   [else
+                    (begin
+                      (do ((x 0 (1+ x))) ((= x 8))
+                        (do ((y 0 (1+ y))) ((= y 8))
+                          (let ([p (matrix-ref board x y)])
+                            (when p
+                              (let ([table-x (if (white? p) x (- 7 x))]
+                                    [table-y (if (white? p) y (- 7 y))])
+                                (if (king? p)
+                                    (if (white? p)
+                                        (begin
+                                          (set! king-w-x x)
+                                          (set! king-w-y y))
+                                        (begin
+                                          (set! king-b-x x)
+                                          (set! king-b-y y)))
+                                    (set! score
+                                          (+ score
+                                             ((if (white? p) + -)
+                                              (cond
+                                               [(king? p) 20000]
+                                               [(queen? p)
+                                                (set! major-piece-value (+ 4 major-piece-value))
+                                                (+ 0 (matrix-ref ml-queen-table table-x table-y))
+                                                #;(+ 900 (matrix-ref ml-queen-table table-x table-y))]
+                                               [(rook? p)
+                                                (set! major-piece-value (+ 2 major-piece-value))
+                                                (+ 0 (matrix-ref ml-rook-table table-x table-y))
+                                                #;(+ 500 (matrix-ref ml-rook-table table-x table-y))]
+                                               [(bishop? p)
+                                                (set! major-piece-value (+ 1 major-piece-value))
+                                                (+ 0 (matrix-ref ml-bishop-table table-x table-y))
+                                                #;(+ 330 (matrix-ref ml-bishop-table table-x table-y))]
+                                               [(knight? p)
+                                                (set! major-piece-value (+ 1 major-piece-value))
+                                                (+ 0 (matrix-ref ml-knight-table table-x table-y))
+                                                #;(+ 320 (matrix-ref ml-knight-table table-x table-y))]
+                                               [(pawn? p)
+                                                (+ 0 (matrix-ref ml-pawn-table table-x table-y))
+                                                #;(+ 100 (matrix-ref ml-pawn-table table-x table-y))]))))))))))
+                      (set! score
+                            (+ score
+                               (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
+                                           king-w-x king-w-y)))
+                      (set! score
+                            (- score
+                               (matrix-ref (if (< major-piece-value 8) king-end-table king-middle-table)
+                                           (- 7 king-b-x) (- 7 king-b-y))))
+                      (let ([noise 30])
                         (let ([result 
                                (+ score
                                   (random noise)
@@ -801,6 +894,10 @@
   (lambda (moves state)
     (cadr (choose-best-move depth moves state #f))))
 
+(define (make-best-move-chooser-with-depth-ml depth)
+  (lambda (moves state)
+    (cadr (choose-best-move-ml depth moves state #f))))
+
 (define (choose-best-move depth moves state first-move-values)
   (call-with-values
       (lambda ()
@@ -820,7 +917,27 @@
       ;;(pretty-print (reverse (map move->algebraic (state-moves state))))
       (cons* best-val best-move move-values))))
 
+(define (choose-best-move-ml depth moves state first-move-values)
+  (call-with-values
+      (lambda ()
+        (alpha-beta-ml state (eq? (state-color state) 'w) depth -inf.0 +inf.0 #f
+                    (if first-move-values
+                        (map cdr
+                             (sort (lambda (p1 p2)
+                                     (> (car p1) (car p2)))
+                                   (map cons first-move-values moves)))
+                        ;;                        (sort (lambda (m1 m2)
+                        ;;                                (> (move-value (car m1))
+                        ;;                                   (move-value (car m2))))
+                        ;;                              (get-possible-moves state))
+                        (get-possible-moves state))))
+    (lambda (best-val best-move move-values)
+      ;;(printf "info score cp ~d depth ~d\n" (exact (floor best-val)) depth)
+      ;;(pretty-print (reverse (map move->algebraic (state-moves state))))
+      (cons* best-val best-move move-values))))
+
 (define (alpha-beta state max? depth alpha beta first-move moves)
+  (set! evaluation-hashtable (make-eq-hashtable))
   (let ([real first-move]
         [move-values '()])
     (if (= depth 0)
@@ -837,6 +954,55 @@
                         (call-with-values
                             (let ([new-state (apply-moves-on-new-copy move state)])
                               (lambda () (alpha-beta
+                                          new-state
+                                          (not max?)
+                                          (1- depth)
+                                          alpha
+                                          beta
+                                          (if first-move first-move move)
+                                          (if (= depth 1)
+                                              '()
+                                              (sort (lambda (m1 m2)
+                                                      ;;(or (eq? 'capture (move-name (car m1)))
+                                                      ;;(eq? 'promotion (move-name (car m1)))
+                                                      ;;(eq? 'en-passant (move-name (car m1))))
+                                                      (> (move-value (car m1))
+                                                         (move-value (car m2))))
+                                                    (get-possible-moves new-state))))))
+                          (lambda (child-val child-first-move)
+                            (when (not first-move)
+                              (set! move-values (cons child-val move-values))
+                              (when ((if max? < >) value child-val)
+                                (set! real child-first-move)))
+                            (set! value ((if max? max min) value child-val))
+                            (if max?
+                                (set! alpha (max alpha value))
+                                (set! beta (min beta value)))
+                            (when (>= alpha beta)
+                              (k #f)))))
+                      moves)))
+                  (if (not first-move)
+                      (values value real (reverse move-values))
+                      (values value first-move))))))))
+
+(define (alpha-beta-ml state max? depth alpha beta first-move moves)
+  (set! evaluation-hashtable (make-eq-hashtable))
+  (let ([real first-move]
+        [move-values '()])
+    (if (= depth 0)
+        (values (evaluate-material-ml state depth) first-move)
+        (if (null? moves)
+            (values (evaluate-material-with-no-more-moves state depth) first-move)
+            (if (and (is-repetition? (state-moves state)) first-move)
+                (values 0 first-move)
+                (let ([value (if max? -inf.0 +inf.0)])
+                  (call/cc
+                   (lambda (k)
+                     (for-each
+                      (lambda (move)
+                        (call-with-values
+                            (let ([new-state (apply-moves-on-new-copy move state)])
+                              (lambda () (alpha-beta-ml
                                           new-state
                                           (not max?)
                                           (1- depth)
@@ -972,10 +1138,10 @@
 (make-best-move-chooser-with-depth 5)))
 
 #;(time (play-one-game (get-starting-board-state)
-(make-best-move-chooser-with-depth 5)
-(make-best-move-chooser-with-depth 5)))
+                     (make-best-move-chooser-with-depth 5)
+                     (make-best-move-chooser-with-depth-ml 5)))
 
-(let ([depth 5])
+#;(let ([depth 5])
   (define s (fen->state "r1bq3r/ppp2kpp/2n5/2b1p3/8/P1P2N2/1PP2PPP/R1BQK2R w KQ - 0 9"))
   (set! counter 0)
   (set! hash-counter 0)
