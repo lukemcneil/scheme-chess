@@ -87,7 +87,7 @@
                                      (1+ i))))
                            (lambda (new-engine)
                              (loop new-engine i))))))))
-        (sleep-seconds 2.5)
+        (sleep-seconds 1)
         (with-mutex mutex
                     (set! done #t)
                     (printf "info looked at ~d\n" counter)
@@ -118,5 +118,6 @@
          (display (string-append "bestmove " (get-best-move moves) "\n"))]
         [("quit") (set! done #t) (printf "info quitting\n")]
         [else (printf "info unrecognized command ~d\n" (car input))])
-      (unless done
-        (loop)))))
+      (if done
+          (exit)
+          (loop)))))
